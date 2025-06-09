@@ -15,7 +15,7 @@
 - Rever documentação técnica de Johan Link
 
 **Tarefas realizadas:**
-- Análise técnica das versões com 3 DoF
+- Análise técnica das versões com 2 braços (motores servo)
 - Estudo dos desenhos técnicos e medidas dos braços
 - Impressão de protótipo de um braço inferior e superior
 - Criação de pasta estruturada do projeto

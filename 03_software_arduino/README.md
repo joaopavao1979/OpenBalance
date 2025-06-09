@@ -1,5 +1,6 @@
-# 💾 Código Arduino – Projeto OpenBalance
+# 📁 03_software_arduino
 
+# 💾 Código Arduino – Projeto OpenBalance
 Este diretório contém os sketches do Arduino para o controlo dos servos do sistema OpenBalance. O código comunica com o computador (Python) para ajustar a inclinação da plataforma em tempo real.
 
 ---
@@ -7,7 +8,8 @@ Este diretório contém os sketches do Arduino para o controlo dos servos do sis
 ## 🧪 Subpastas
 
 ### 📁 `testes_motores/`
-- `teste_manual_servo.ino`: código simples para testar se os servos estão a funcionar corretamente (varre de 0° a 180° com delay).
+        calibracao_servos_v1
+        código simples para calibrar os 2 motores servo (X e Y). Inicialmente os servo vão para a poisição de 90º e atraves do monitor serial podemos ajustar escrevendo X0 (para o angulo 0º no motor X) ou Y120 (para o angulo de 120º no motor Y).
 
 ### 📁 `controlo_pid/`
 - `openbalance_pid.ino`: implementa PID no próprio Arduino (opcional).
@@ -20,15 +22,15 @@ Este diretório contém os sketches do Arduino para o controlo dos servos do sis
 
 ## 🛠️ Hardware Esperado
 
-- Arduino UNO ou Leonardo (ATmega328 ou ATmega32u4)
-- 3 servos MG996R ou similares
+- Arduino UNO
+- 2 servos MG996R ou similares
 - Cabo USB para comunicação serial
 
 ---
 
 ## 🔌 Comunicação com Python
 
-- Os ângulos desejados (θ₁, θ₂, θ₃) são enviados via porta serial (ex: "90;95;100")
+- Os ângulos desejados (θ₁, θ₂) são enviados via porta serial (ex: "90;95;100")
 - O Arduino interpreta os valores e usa `servo.writeMicroseconds()` ou `servo.write()`
 
 ---
@@ -36,3 +38,4 @@ Este diretório contém os sketches do Arduino para o controlo dos servos do sis
 ## 🔧 Dependências
 
 - Biblioteca Servo.h (incluída por padrão no Arduino IDE)
+- Biblioteca Adafruit_PWMServoDriver.h (Shield usada para os motores servo)

@@ -3,7 +3,7 @@
 **Nome do Projeto:** OpenBalance  
 **Autor:** João Pavão  
 **Instituição:** Universidade dos Açores – PRIA  
-**Período:** Maio – Julho 2025  
+**Período:** de maio a junho 2025  
 **Versão:** 1.0
 
 ---
@@ -16,13 +16,13 @@ Desenvolver um sistema open source capaz de manter uma bola em equilíbrio sobre
 
 ## 📦 Componentes principais
 
-| Componente | Função |
-|------------|--------|
+| Componente                    | Função                                    |
+|-------------------------------|-------------------------------------------|
 | Arduino (ex: UNO ou Leonardo) | Controlo dos servos e receção de comandos |
-| 3 Servos Motores | Ajuste da inclinação da plataforma |
-| Estrutura 3D (braços + prato) | Suporte físico articulado |
-| Webcam + OpenCV | Deteção da posição da bola em tempo real |
-| Python | Cálculo do PID e interface com Arduino |
+| 2 Servos Motores (eixo X e Y) | Ajuste da inclinação da plataforma        |
+| Estrutura 3D (braços + prato) | Suporte físico articulado                 |
+| Webcam + OpenCV               | Deteção da posição da bola em tempo real  |
+| Python                        | Cálculo do PID e interface com Arduino    |
 
 ---
 
@@ -68,5 +68,6 @@ O OpenBalance será usado como ferramenta de aprendizagem interdisciplinar:
 
 - `27/05/2025`: Criação do projeto e estrutura de pastas
 - `01/06/2025`: Início da montagem física
+- `08/06/2025`: Finalização da construção da plataforma
 - (continua...)
 
