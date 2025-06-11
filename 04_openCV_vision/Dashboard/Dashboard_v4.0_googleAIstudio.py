@@ -1,5 +1,5 @@
 """
-OpenBalance Dashboard (Versão 4.2 - Edição de Calibração Definitiva)
+OpenBalance Dashboard (Versão 4.0 - Edição de Calibração Definitiva)
 ====================================================================
 
 Descrição:

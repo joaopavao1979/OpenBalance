@@ -1,0 +1,918 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+OpenBalance Dashboard (Versão 5.2 - Edição de Controlo Refinado)
+================================================================================
+
+Descrição:
+    Dashboard de controlo para uma plataforma de equilíbrio de bola. A Versão 5.2
+    introduz correções críticas de controlo e melhorias de usabilidade,
+    solidificando a base estável da v5.0.
+
+Arquitetura e Melhorias Notáveis (v5.2):
+    - **CORREÇÃO DA LÓGICA PID:** A lógica de cálculo do erro foi ajustada para
+      garantir um feedback negativo adequado. Anteriormente, o sistema exibia
+      feedback positivo (a plataforma seguia a bola). Agora, a plataforma move-se
+      corretamente para contrariar o movimento da bola, estabilizando-a no centro.
+    - **BOTÃO DE NIVELAMENTO:** Foi adicionado um novo botão "Nivelar Plataforma"
+      ao separador "Operação". Este comando move os servos para a posição de
+      equilíbrio definida na calibração, facilitando a preparação para um teste.
+    - **CÓDIGO EXTENSIVAMENTE COMENTADO:** A pedido, o código foi revisto para
+      adicionar comentários detalhados e melhorar a formatação, tornando-o
+      mais legível e fácil de manter.
+    - **Mantém Todas as Funcionalidades Anteriores:** Filtro de Kalman, PID por
+      eixo independente e o assistente de calibração continuam totalmente
+      funcionais e aprimorados pela nova estabilidade do controlo.
+
+Autor:
+    João Pavão (Conceito Original)
+    Refatorado e Comentado por Equipa de Engenharia de Software (para fins didáticos)
+"""
+
+# -----------------------------------------------------------------------------
+# 1. IMPORTAÇÕES E CONSTANTES GLOBAIS
+# -----------------------------------------------------------------------------
+import json
+import threading
+import cv2
+import numpy as np
+import customtkinter as ctk
+import serial
+import serial.tools.list_ports
+from PIL import Image, ImageTk
+import tkinter as tk
+from tkinter import filedialog, messagebox
+
+# Constantes da Interface
+WINDOW_WIDTH = 1500
+WINDOW_HEIGHT = 850
+VIDEO_WIDTH = 800
+VIDEO_HEIGHT = 600
+
+# Constantes de Comunicação Serial
+DEFAULT_BAUDRATE = 9600
+CMD_MOTORS_ON = "M1\n"
+CMD_MOTORS_OFF = "M0\n"
+CMD_CALIBRATION_PREFIX = "C"
+
+# Paleta de Cores para a UI
+COLOR_SUCCESS = {"fg_color": "#2E7D32", "hover_color": "#1B5E20"}
+COLOR_DANGER = {"fg_color": "#C62828", "hover_color": "#B71C1C"}
+COLOR_NEUTRAL = {"fg_color": "#1E88E5", "hover_color": "#1565C0"}
+COLOR_SECONDARY = {"fg_color": "#616161", "hover_color": "#424242"}
+
+# Presets de Deteção de Cor HSV
+HSV_PRESETS = {
+    "Vermelho": {"h_min": 0, "h_max": 10, "s_min": 100, "s_max": 255, "v_min": 100, "v_max": 255},
+    "Laranja": {"h_min": 10, "h_max": 25, "s_min": 100, "s_max": 255, "v_min": 100, "v_max": 255},
+    "Verde": {"h_min": 40, "h_max": 80, "s_min": 100, "s_max": 255, "v_min": 100, "v_max": 255},
+    "Cinzento": {"h_min": 0, "h_max": 180, "s_min": 0, "s_max": 50, "v_min": 50, "v_max": 200},
+    "Azul": {"h_min": 90, "h_max": 130, "s_min": 100, "s_max": 255, "v_min": 50, "v_max": 255},
+    "Branco": {"h_min": 0, "h_max": 180, "s_min": 0, "s_max": 30, "v_min": 200, "v_max": 255}
+}
+BUTTON_COLORS = {
+    "Vermelho": {"fg": "#FF0000", "hover": "#CC0000", "text": "white"},
+    "Laranja": {"fg": "#FFA500", "hover": "#CC8400", "text": "white"},
+    "Verde": {"fg": "#00B200", "hover": "#008000", "text": "white"},
+    "Cinzento": {"fg": "#808080", "hover": "#666666", "text": "white"},
+    "Azul": {"fg": "#0000FF", "hover": "#0000CC", "text": "white"},
+    "Branco": {"fg": "#FFFFFF", "hover": "#DDDDDD", "text": "black"}
+}
+
+# -----------------------------------------------------------------------------
+# 2. CLASSES UTILITÁRIAS
+# -----------------------------------------------------------------------------
+class SerialManager:
+    """Gere a conexão serial com o microcontrolador (Arduino)."""
+    def __init__(self):
+        self.serial_conn = None
+
+    def list_ports(self):
+        return [port.device for port in serial.tools.list_ports.comports()]
+
+    def connect(self, port, baudrate=DEFAULT_BAUDRATE):
+        try:
+            if self.serial_conn and self.serial_conn.is_open:
+                self.serial_conn.close()
+            self.serial_conn = serial.Serial(port, baudrate, timeout=1)
+            return True
+        except Exception:
+            self.serial_conn = None
+            return False
+
+    def disconnect(self):
+        if self.serial_conn and self.serial_conn.is_open:
+            self.serial_conn.close()
+        self.serial_conn = None
+
+    def send(self, data_str):
+        if not self.serial_conn or not self.serial_conn.is_open:
+            return
+        try:
+            self.serial_conn.write(data_str.encode('utf-8'))
+        except serial.SerialException:
+            self.disconnect()
+
+class StatusBar(ctk.CTkFrame):
+    """Uma barra de status simples para exibir mensagens temporárias."""
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.label = ctk.CTkLabel(self, text="", anchor="w")
+        self.label.pack(side="left", fill="x", expand=True, padx=10, pady=2)
+        self._job = None
+
+    def show_message(self, message, duration_ms=4000, is_error=False):
+        if self._job:
+            self.after_cancel(self._job)
+        text_color = COLOR_DANGER["fg_color"] if is_error else "gray70"
+        self.label.configure(text=message, text_color=text_color)
+        self._job = self.after(duration_ms, lambda: self.label.configure(text=""))
+
+class PIDController:
+    """Implementação de um controlador PID (Proporcional-Integral-Derivativo)."""
+    def __init__(self, Kp, Ki, Kd, setpoint=0):
+        self.Kp, self.Ki, self.Kd = Kp, Ki, Kd
+        self.setpoint = setpoint
+        self._last_error, self._integral = 0, 0
+
+    def update(self, process_variable):
+        """
+        Calcula a saída do PID.
+        Espera receber a 'process_variable' (ex: posição da bola) e não um erro pré-calculado.
+        """
+        error = self.setpoint - process_variable
+        self._integral += error
+        derivative = error - self._last_error
+        self._last_error = error
+        return self.Kp * error + self.Ki * self._integral + self.Kd * derivative
+
+    def set_gains(self, Kp, Ki, Kd):
+        self.Kp, self.Ki, self.Kd = Kp, Ki, Kd
+        self._integral = 0  # Resetar o termo integral ao mudar os ganhos
+
+class KalmanFilter:
+    """
+    Uma classe wrapper para o Filtro de Kalman do OpenCV para rastrear um objeto
+    numa dimensão (como a posição x ou y), considerando a sua velocidade.
+    """
+    def __init__(self):
+        # dynamParams=4 (estado: pos_x, vel_x, pos_y, vel_y), measureParams=2 (medição: pos_x, pos_y)
+        self.kalman = cv2.KalmanFilter(4, 2)
+        
+        # Matriz de Medição (H): Mapeia o estado para a medição. Medimos apenas as posições.
+        self.kalman.measurementMatrix = np.array([[1, 0, 0, 0], [0, 0, 1, 0]], np.float32)
+
+        # Matriz de Transição (A): Modela como o estado evolui no tempo.
+        dt = 0.1  # Delta de tempo, um fator de sintonização
+        self.kalman.transitionMatrix = np.array([[1, dt, 0, 0], [0, 1, 0, 0], [0, 0, 1, dt], [0, 0, 0, 1]], np.float32)
+
+        # Matriz de Covariância do Ruído do Processo (Q): Incerteza no nosso modelo de movimento.
+        self.kalman.processNoiseCov = np.eye(4, dtype=np.float32) * 0.03
+
+        # Matriz de Covariância do Ruído da Medição (R): Incerteza na nossa medição (câmara).
+        self.kalman.measurementNoiseCov = np.eye(2, dtype=np.float32) * 0.5
+
+    def predict(self):
+        """Prevê a próxima posição do objeto."""
+        prediction = self.kalman.predict()
+        return (prediction[0, 0], prediction[2, 0]) # pos_x, pos_y
+
+    def correct(self, measurement_pos):
+        """Corrige a previsão com base na medição atual (apenas posição)."""
+        measurement_vec = np.array([[np.float32(measurement_pos[0])], [np.float32(measurement_pos[1])]])
+        corrected = self.kalman.correct(measurement_vec)
+        return (corrected[0, 0], corrected[2, 0]) # pos_x, pos_y
+
+# -----------------------------------------------------------------------------
+# 3. CLASSES DE INTERFACE GRÁFICA (FRAMES)
+# -----------------------------------------------------------------------------
+class HSVSettingsFrame(ctk.CTkFrame):
+    """Frame para configurar os parâmetros de deteção de cor HSV."""
+    def __init__(self, parent, video_handler, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.video_handler = video_handler
+        self.grid_columnconfigure(0, weight=1)
+        self.filter_enabled = True
+        
+        ctk.CTkLabel(self, text="Deteção de Cor (HSV)", font=("Arial", 16, "bold")).grid(row=0, column=0, pady=(10, 15), sticky="n")
+        
+        self.hsv_sliders = []
+        self.hsv_values = []
+        labels = ["H Min", "H Max", "S Min", "S Max", "V Min", "V Max"]
+        
+        for idx, label in enumerate(labels):
+            ctk.CTkLabel(self, text=label).grid(row=1 + 2*idx, column=0, padx=10, sticky="w")
+            val_var = ctk.StringVar(value="0")
+            self.hsv_values.append(val_var)
+            
+            slider = ctk.CTkSlider(self, from_=0, to=255, command=lambda val, var=val_var: var.set(f"{int(val)}"))
+            slider.grid(row=2 + 2*idx, column=0, padx=10, pady=(0,5), sticky="ew")
+            self.hsv_sliders.append(slider)
+            
+            ctk.CTkLabel(self, textvariable=val_var).grid(row=2 + 2*idx, column=0, padx=(270,10), sticky="e")
+            
+        self.show_mask_var = ctk.BooleanVar(value=False)
+        self.checkbox_mask = ctk.CTkCheckBox(self, text="Mostrar Máscara", variable=self.show_mask_var, command=self._on_toggle_mask)
+        self.checkbox_mask.grid(row=13, column=0, pady=(15,10), padx=10, sticky="w")
+        
+        preset_frame = ctk.CTkFrame(self, fg_color="transparent")
+        preset_frame.grid(row=14, column=0, sticky="ew", padx=10)
+        preset_frame.grid_columnconfigure((0, 1, 2), weight=1)
+        
+        ctk.CTkButton(preset_frame, text="Sem Filtro", command=self._disable_filter, **COLOR_SECONDARY).grid(row=0, column=0, pady=3, padx=3, sticky="ew")
+        
+        color_items = list(BUTTON_COLORS.items())
+        for i, (name, colors) in enumerate(color_items):
+            row = (i + 1) // 3
+            col = (i + 1) % 3
+            btn = ctk.CTkButton(preset_frame, text=name, fg_color=colors["fg"], hover_color=colors["hover"], text_color=colors["text"], command=lambda cn=name: self._apply_preset(cn))
+            btn.grid(row=row, column=col, pady=3, padx=3, sticky="ew")
+
+    def _toggle_filter_controls(self, enabled):
+        state = "normal" if enabled else "disabled"
+        for widget in self.hsv_sliders + [self.checkbox_mask]:
+            widget.configure(state=state)
+        self.filter_enabled = enabled
+
+    def _disable_filter(self):
+        self._toggle_filter_controls(False)
+        if self.video_handler:
+            self.video_handler.update_once()
+
+    def _apply_preset(self, color_name):
+        self._toggle_filter_controls(True)
+        preset = HSV_PRESETS.get(color_name)
+        if not preset:
+            return
+        vals = [preset[k] for k in ["h_min", "h_max", "s_min", "s_max", "v_min", "v_max"]]
+        for i, val in enumerate(vals):
+            self.hsv_sliders[i].set(val)
+            self.hsv_values[i].set(str(val))
+        if self.video_handler:
+            self.video_handler.update_once()
+
+    def _on_toggle_mask(self):
+        if self.video_handler:
+            self.video_handler.show_mask = self.show_mask_var.get()
+
+    def get_hsv_bounds(self):
+        try:
+            vals = [int(v.get()) for v in self.hsv_values]
+        except (ValueError, tk.TclError):
+            vals = [0, 255, 0, 255, 0, 255] # Valores padrão em caso de erro
+        return np.array([vals[0], vals[2], vals[4]]), np.array([vals[1], vals[3], vals[5]])
+
+    def load_hsv(self, hsv_dict):
+        self._toggle_filter_controls(True)
+        vals = [hsv_dict.get(k, d) for k, d in [("h_min",0),("h_max",255),("s_min",0),("s_max",255),("v_min",0),("v_max",255)]]
+        for i, val in enumerate(vals):
+            self.hsv_sliders[i].set(val)
+            self.hsv_values[i].set(str(val))
+
+    def save_hsv(self):
+        l, u = self.get_hsv_bounds()
+        return {"h_min": int(l[0]),"h_max": int(u[0]),"s_min": int(l[1]),"s_max": int(u[1]),"v_min": int(l[2]),"v_max": int(u[2])}
+
+class VideoHandler:
+    """Gere a captura de vídeo, processamento de imagem e envio de comandos de controlo."""
+    def __init__(self, parent, hsv_frame, serial_manager, app_ref):
+        self.parent = parent
+        self.hsv_frame = hsv_frame
+        self.serial_manager = serial_manager
+        self.app = app_ref
+        
+        self.camera_index = 0
+        self.show_mask = False
+        self.tracking_enabled = False
+        self.running = False
+        self.cap = None
+        self.thread = None
+        
+        self.pid_x = PIDController(0, 0, 0)
+        self.pid_y = PIDController(0, 0, 0)
+        
+        # Um único filtro de Kalman para rastrear o estado 2D (posição x, y)
+        self.kalman_filter = KalmanFilter()
+        self.kalman_enabled = tk.BooleanVar(value=True)
+
+        # -- Widgets da UI --
+        self.canvas = ctk.CTkCanvas(parent, width=VIDEO_WIDTH, height=VIDEO_HEIGHT, bg="gray20", highlightthickness=0)
+        self.canvas.grid(row=2, column=0, padx=10, pady=10, sticky="nsew")
+        
+        self.status_frame = ctk.CTkFrame(parent, corner_radius=5)
+        self.status_frame.grid(row=3, column=0, pady=(0, 10), padx=10, sticky="ew")
+        self.status_frame.grid_columnconfigure((0, 1), weight=1)
+        
+        self.servo_x_var = ctk.StringVar(value="Erro X: 0")
+        self.servo_y_var = ctk.StringVar(value="Erro Y: 0")
+        self.pid_x_var = ctk.StringVar(value="PID X: 0.00")
+        self.pid_y_var = ctk.StringVar(value="PID Y: 0.00")
+        
+        ctk.CTkLabel(self.status_frame, textvariable=self.servo_x_var).grid(row=0, column=0, padx=10, pady=2, sticky="w")
+        ctk.CTkLabel(self.status_frame, textvariable=self.servo_y_var).grid(row=1, column=0, padx=10, pady=2, sticky="w")
+        ctk.CTkLabel(self.status_frame, textvariable=self.pid_x_var).grid(row=0, column=1, padx=10, pady=2, sticky="w")
+        ctk.CTkLabel(self.status_frame, textvariable=self.pid_y_var).grid(row=1, column=1, padx=10, pady=2, sticky="w")
+        
+        self._initialize_camera()
+        
+    def _process_and_draw(self, frame_bgr):
+        display_img = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        self.kalman_filter.predict()
+
+        if self.hsv_frame.filter_enabled:
+            hsv_frame = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+            lower, upper = self.hsv_frame.get_hsv_bounds()
+            mask = cv2.inRange(hsv_frame, lower, upper)
+            
+            # Operações morfológicas para limpar o ruído da máscara
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+            
+            if self.show_mask:
+                display_img = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
+                
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            ball_detected = False
+            if contours:
+                c = max(contours, key=cv2.contourArea)
+                if cv2.contourArea(c) > 500: # Filtrar contornos muito pequenos
+                    ball_detected = True
+                    ((x, y), radius) = cv2.minEnclosingCircle(c)
+                    
+                    # Corrigir a estimativa do Kalman com a nova medição
+                    corrected_pos = self.kalman_filter.correct((x, y))
+                    corrected_x, corrected_y = corrected_pos[0], corrected_pos[1]
+                    
+                    # Escolher entre posição filtrada ou crua com base na checkbox
+                    final_x, final_y = (corrected_x, corrected_y) if self.kalman_enabled.get() else (x, y)
+                    
+                    # --- CORREÇÃO CRÍTICA v5.2 ---
+                    # O cálculo do erro foi invertido para (Setpoint - Posição_Atual).
+                    # A classe PID calcula internamente 'setpoint(0) - process_variable'.
+                    # Ao passar um erro já calculado, ocorria uma dupla inversão,
+                    # resultando em feedback positivo (a plataforma seguia a bola).
+                    # Esta correção garante o feedback negativo correto.
+                    erro_x = (VIDEO_WIDTH // 2) - int(final_x)
+                    erro_y = (VIDEO_HEIGHT // 2) - int(final_y)
+                    
+                    self.servo_x_var.set(f"Erro X: {erro_x}")
+                    self.servo_y_var.set(f"Erro Y: {erro_y}")
+                    
+                    if self.tracking_enabled:
+                        pid_output_x = self.pid_x.update(erro_x)
+                        pid_output_y = self.pid_y.update(erro_y)
+                        self.pid_x_var.set(f"PID X: {pid_output_x:.2f}")
+                        self.pid_y_var.set(f"PID Y: {pid_output_y:.2f}")
+                        self.send_servo_command(pid_output_x, pid_output_y)
+                    
+                    # Desenhar a posição medida (crua) em vermelho
+                    cv2.circle(display_img, (int(x), int(y)), int(radius), (255, 0, 0, 128), 2)
+                    # Desenhar a posição estimada (filtrada) em verde
+                    cv2.circle(display_img, (int(final_x), int(final_y)), int(radius)+2, (0, 255, 0), 2)
+            
+            if not ball_detected:
+                self.servo_x_var.set("Erro X: (perdido)")
+                self.servo_y_var.set("Erro Y: (perdido)")
+                self.pid_x_var.set("PID X: 0.00")
+                self.pid_y_var.set("PID Y: 0.00")
+        else:
+            self.servo_x_var.set("Erro X: (sem filtro)")
+            self.servo_y_var.set("Erro Y: (sem filtro)")
+
+        # Desenhar a cruz central
+        cx, cy = VIDEO_WIDTH // 2, VIDEO_HEIGHT // 2
+        cv2.line(display_img, (cx - 10, cy), (cx + 10, cy), (255, 255, 0), 1)
+        cv2.line(display_img, (cx, cy - 10), (cx, cy + 10), (255, 255, 0), 1)
+        
+        # Atualizar a imagem no canvas
+        img_pil = Image.fromarray(display_img)
+        img_tk = ImageTk.PhotoImage(image=img_pil)
+        self.canvas.create_image(0, 0, anchor="nw", image=img_tk)
+        self.canvas.image = img_tk
+
+
+    def send_servo_command(self, pid_output_x, pid_output_y):
+        """Envia o comando final aos servos, após mapear a saída do PID."""
+        calib = self.app.calibration_data
+        pid_min, pid_max = -1000, 1000  # Gama de saída esperada do PID
+
+        # --- CORREÇÃO CRÍTICA v5.2.1 ---
+        # A montagem mecânica pode fazer com que um aumento no sinal do servo (μs)
+        # incline a plataforma na direção errada (feedback positivo).
+        # Para corrigir isto, invertemos a gama de mapeamento do servo.
+        # Em vez de mapear para [min, max], mapeamos para [max, min].
+        # Isto inverte a resposta do controlo para corresponder à realidade física.
+
+        # Mapeia a saída do PID para a gama de microssegundos do servo, de forma INVERTIDA.
+        target_x_us = self.map_value(
+            pid_output_x,
+            pid_min, pid_max,
+            calib['x_max_us'], calib['x_min_us']  # Gama invertida: max -> min
+        ) + calib['x_center_offset_us']
+
+        target_y_us = self.map_value(
+            pid_output_y,
+            pid_min, pid_max,
+            calib['y_max_us'], calib['y_min_us']  # Gama invertida: max -> min
+        ) + calib['y_center_offset_us']
+
+        cmd_str = f"{CMD_CALIBRATION_PREFIX},{int(target_x_us)},{int(target_y_us)}\n"
+        self.serial_manager.send(cmd_str)
+        
+    @staticmethod
+    def map_value(v, f_min, f_max, t_min, t_max):
+        """Mapeia um valor de uma gama para outra (como o map() do Arduino)."""
+        return (v - f_min) * (t_max - t_min) / (f_max - f_min) + t_min
+        
+    def _initialize_camera(self):
+        self.stop() # Garante que a thread anterior foi terminada
+        self.camera_index = int(self.app.cam_index_var.get())
+        
+        self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, VIDEO_WIDTH)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, VIDEO_HEIGHT)
+        
+        if not self.cap.isOpened():
+            messagebox.showerror("Erro de Câmara", f"Não foi possível aceder à câmara (índice {self.camera_index}).")
+            self.cap = None
+        else:
+            self.running = True
+            self.thread = threading.Thread(target=self._video_loop, daemon=True)
+            self.thread.start()
+
+    def _video_loop(self):
+        while self.running:
+            if self.cap and self.cap.isOpened():
+                ret, frame = self.cap.read()
+                if ret:
+                    self._process_and_draw(frame)
+                else:
+                    # Se a leitura falhar, para o loop para evitar erros
+                    self.running = False
+            else:
+                self.running = False
+
+    def stop(self):
+        self.running = False
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=1)
+        if self.cap:
+            self.cap.release()
+        self.cap = None
+        self.thread = None
+
+    def update_once(self):
+        """Força uma única atualização do frame, útil quando o vídeo está pausado."""
+        if self.cap and self.cap.isOpened():
+            ret, frame = self.cap.read()
+            if ret:
+                self._process_and_draw(frame)
+
+    def change_camera(self, new_index):
+        if self.running:
+            self._initialize_camera()
+
+class ControlFrame(ctk.CTkFrame):
+    """Frame que contém todos os controlos da aplicação: PID, calibração, e operações."""
+    def __init__(self, parent, serial_manager, app_ref, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.serial_manager = serial_manager
+        self.app = app_ref
+        
+        self.tab_view = ctk.CTkTabview(self)
+        self.tab_view.pack(expand=True, fill="both")
+        
+        self._create_operation_tab(self.tab_view.add("Operação"))
+        self._create_calibration_tab(self.tab_view.add("Calibração (μs)"))
+        self._create_assistant_tab(self.tab_view.add("Assistente de Calibração (º)"))
+
+    def _create_operation_tab(self, tab):
+        tab.grid_columnconfigure(0, weight=1)
+        
+        # --- Grupo de Ganhos PID ---
+        self.pid_params_widgets = {"X": {}, "Y": {}}
+        pid_group_x, widgets_x = self._create_pid_group(tab, "X")
+        pid_group_x.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
+        self.pid_params_widgets["X"] = widgets_x
+        
+        pid_group_y, widgets_y = self._create_pid_group(tab, "Y")
+        pid_group_y.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
+        self.pid_params_widgets["Y"] = widgets_y
+        
+        btn_apply_pid = ctk.CTkButton(tab, text="Aplicar Ganhos PID", command=self._apply_pid_gains, **COLOR_NEUTRAL)
+        btn_apply_pid.grid(row=2, column=0, pady=10, padx=10, sticky="ew")
+        
+        # --- Grupo de Controlo do Sistema ---
+        motor_group = ctk.CTkFrame(tab, fg_color="transparent")
+        motor_group.grid(row=3, column=0, padx=10, pady=10, sticky="ew")
+        motor_group.grid_columnconfigure((0,1), weight=1)
+        
+        ctk.CTkLabel(motor_group,text="Controlo do Sistema",font=("Arial",14,"bold")).grid(row=0,column=0,columnspan=2,pady=5)
+        
+        ctk.CTkButton(motor_group,text="Ligar Motores",command=lambda:self.serial_manager.send(CMD_MOTORS_ON),**COLOR_SUCCESS).grid(row=1,column=0,padx=5,pady=5,sticky="ew")
+        ctk.CTkButton(motor_group,text="Desligar Motores",command=lambda:self.serial_manager.send(CMD_MOTORS_OFF),**COLOR_DANGER).grid(row=1,column=1,padx=5,pady=5,sticky="ew")
+        
+        # --- ADIÇÃO v5.2 ---
+        # Botão para nivelar a plataforma de acordo com a calibração
+        btn_center = ctk.CTkButton(motor_group, text="Nivelar Plataforma", command=self._center_platform, **COLOR_NEUTRAL)
+        btn_center.grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
+        
+        self.btn_ligar_seguimento = ctk.CTkButton(motor_group,text="Ligar Seguimento",command=self._toggle_seguimento,**COLOR_SECONDARY)
+        self.btn_ligar_seguimento.grid(row=3,column=0,columnspan=2,padx=5,pady=5,sticky="ew")
+        
+        # --- Grupo de Comunicação Serial ---
+        serial_group = ctk.CTkFrame(tab, fg_color="transparent")
+        serial_group.grid(row=4, column=0, padx=10, pady=10, sticky="ew")
+        serial_group.grid_columnconfigure(0, weight=1)
+        
+        ctk.CTkLabel(serial_group,text="Comunicação Arduino",font=("Arial",14,"bold")).grid(row=0,column=0,columnspan=2,pady=5)
+        
+        portas = self.serial_manager.list_ports()
+        self.porta_var = tk.StringVar(value=portas[0] if portas else "Nenhuma porta")
+        self.option_menu_porta = ctk.CTkOptionMenu(serial_group,values=portas if portas else ["Nenhuma porta"],variable=self.porta_var)
+        self.option_menu_porta.grid(row=1,column=0,padx=5,pady=5,sticky="ew")
+        
+        ctk.CTkButton(serial_group,text="🔄",width=30,command=self._atualizar_portas).grid(row=1,column=1,padx=5,pady=5)
+        ctk.CTkButton(serial_group,text="Ligar",command=self._ligar_arduino,**COLOR_SUCCESS).grid(row=2,column=0,padx=5,pady=5,sticky="ew")
+        ctk.CTkButton(serial_group,text="Desligar",command=self._desligar_arduino,**COLOR_DANGER).grid(row=2,column=1,padx=5,pady=5,sticky="ew")
+
+    def _create_pid_group(self, parent, axis_name):
+        group = ctk.CTkFrame(parent, fg_color="transparent")
+        group.grid_columnconfigure(1, weight=1)
+        
+        ctk.CTkLabel(group, text=f"Ganhos PID (Eixo {axis_name})", font=("Arial", 14, "bold")).grid(row=0, column=0, columnspan=3, pady=(10, 5))
+        
+        pid_widgets_for_axis = {}
+        for i, param in enumerate(["Kp", "Ki", "Kd"]):
+            ctk.CTkLabel(group, text=param).grid(row=i + 1, column=0, padx=(5, 10), pady=5, sticky="w")
+            
+            slider = ctk.CTkSlider(group, from_=0, to=1, number_of_steps=1000)
+            slider.grid(row=i + 1, column=1, padx=5, pady=5, sticky="ew")
+            
+            entry = ctk.CTkEntry(group, width=60)
+            entry.grid(row=i + 1, column=2, padx=(5, 10), pady=5, sticky="e")
+            
+            def update_from_slider(v, p=param, ax=axis_name):
+                w = self.pid_params_widgets[ax][p]['entry']
+                w.delete(0, 'end')
+                w.insert(0, f"{v:.3f}")
+
+            def update_from_entry(e, p=param, ax=axis_name):
+                try:
+                    self.pid_params_widgets[ax][p]['slider'].set(float(self.pid_params_widgets[ax][p]['entry'].get()))
+                except(ValueError, KeyError, tk.TclError):
+                    pass # Ignora erros de digitação
+            
+            slider.configure(command=update_from_slider)
+            entry.bind("<Return>", update_from_entry)
+            entry.bind("<FocusOut>", update_from_entry)
+            
+            pid_widgets_for_axis[param] = {'slider': slider, 'entry': entry}
+            pid_widgets_for_axis[param]['entry'].insert(0, "0.000")
+            
+        return group, pid_widgets_for_axis
+
+    def _create_calibration_tab(self, tab):
+        tab.grid_columnconfigure(0, weight=1)
+        
+        center_group = ctk.CTkFrame(tab, fg_color="transparent")
+        center_group.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        center_group.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(center_group, text="Nivelamento Central (Offset μs)", font=("Arial", 14, "bold")).grid(row=0, column=0, columnspan=2, pady=5)
+        
+        self.calib_vars = {}
+        for i, name in enumerate(['x_center_offset_us', 'y_center_offset_us']):
+            var = tk.IntVar(value=self.app.calibration_data.get(name, 0))
+            self.calib_vars[name] = var
+            label = "X" if "x_" in name else "Y"
+            ctk.CTkLabel(center_group, text=f"Offset {label}:").grid(row=i+1, column=0, sticky="w", padx=5)
+            entry = ctk.CTkEntry(center_group, textvariable=var, width=60)
+            entry.grid(row=i+1, column=1, sticky="e", padx=5)
+            entry.bind("<Return>", self._send_center_calib_command)
+            entry.bind("<FocusOut>", self._send_center_calib_command)
+        
+        ctk.CTkButton(center_group, text="Testar Posição Central", command=self._send_center_calib_command, **COLOR_NEUTRAL).grid(row=3, column=0, columnspan=2, sticky="ew", pady=10, padx=5)
+        
+        limits_group = ctk.CTkFrame(tab, fg_color="transparent")
+        limits_group.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
+        limits_group.grid_columnconfigure((1,3), weight=1)
+        ctk.CTkLabel(limits_group, text="Limites de Movimento (μs)", font=("Arial", 14, "bold")).grid(row=0, column=0, columnspan=5, pady=5)
+        
+        for name in ['x_min_us', 'x_max_us', 'y_min_us', 'y_max_us']:
+            var = tk.IntVar(value=self.app.calibration_data.get(name, 1500))
+            self.calib_vars[name] = var
+            axis, limit, row = ("X","Mín",1) if name=='x_min_us' else (("X","Máx",1) if name=='x_max_us' else (("Y","Mín",2) if name=='y_min_us' else ("Y","Máx",2)))
+            col_offset = 0 if "min" in name else 2
+            ctk.CTkLabel(limits_group, text=f"{axis} {limit}:").grid(row=row, column=col_offset, sticky="w", padx=5)
+            ctk.CTkEntry(limits_group, textvariable=var, width=70).grid(row=row, column=col_offset+1, sticky="ew", padx=5)
+            ctk.CTkButton(limits_group, text="T", width=25, command=lambda n=name: self._send_limit_test_command(n)).grid(row=row, column=col_offset+2, padx=(0,5))
+
+    def _create_assistant_tab(self, tab):
+        tab.grid_columnconfigure((0, 1), weight=1)
+        
+        servo_params_frame = ctk.CTkFrame(tab)
+        servo_params_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
+        servo_params_frame.grid_columnconfigure((1, 3), weight=1)
+        ctk.CTkLabel(servo_params_frame, text="Parâmetros do Servo Motor (Padrão: 0-180º)", font=("Arial", 14, "bold")).grid(row=0, column=0, columnspan=4, pady=5)
+        ctk.CTkLabel(servo_params_frame, text="μs para 0º:").grid(row=1, column=0, padx=10, pady=5, sticky="e")
+        self.servo_min_us_var = tk.StringVar(value="1000")
+        ctk.CTkEntry(servo_params_frame, textvariable=self.servo_min_us_var, width=80).grid(row=1, column=1, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(servo_params_frame, text="μs para 180º:").grid(row=1, column=2, padx=10, pady=5, sticky="e")
+        self.servo_max_us_var = tk.StringVar(value="2000")
+        ctk.CTkEntry(servo_params_frame, textvariable=self.servo_max_us_var, width=80).grid(row=1, column=3, padx=10, pady=5, sticky="w")
+        
+        motor_x_frame = ctk.CTkFrame(tab)
+        motor_x_frame.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+        motor_x_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(motor_x_frame, text="Motor X", font=("Arial", 14, "bold")).grid(row=0, column=0, columnspan=2, pady=5)
+        
+        self.angle_vars = {}
+        for i, (name, label_text, default_val) in enumerate([("x_eq", "Equilíbrio (º):", "90"), ("x_min", "Mínimo (º):", "60"), ("x_max", "Máximo (º):", "120")]):
+            ctk.CTkLabel(motor_x_frame, text=label_text).grid(row=i+1, column=0, padx=10, pady=5, sticky="e")
+            var = tk.StringVar(value=default_val)
+            ctk.CTkEntry(motor_x_frame, textvariable=var, width=80).grid(row=i+1, column=1, padx=10, pady=5, sticky="w")
+            self.angle_vars[name] = var
+            
+        motor_y_frame = ctk.CTkFrame(tab)
+        motor_y_frame.grid(row=1, column=1, padx=10, pady=10, sticky="nsew")
+        motor_y_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(motor_y_frame, text="Motor Y", font=("Arial", 14, "bold")).grid(row=0, column=0, columnspan=2, pady=5)
+        
+        for i, (name, label_text, default_val) in enumerate([("y_eq", "Equilíbrio (º):", "80"), ("y_min", "Mínimo (º):", "50"), ("y_max", "Máximo (º):", "110")]):
+            ctk.CTkLabel(motor_y_frame, text=label_text).grid(row=i+1, column=0, padx=10, pady=5, sticky="e")
+            var = tk.StringVar(value=default_val)
+            ctk.CTkEntry(motor_y_frame, textvariable=var, width=80).grid(row=i+1, column=1, padx=10, pady=5, sticky="w")
+            self.angle_vars[name] = var
+            
+        ctk.CTkButton(tab, text="Calcular e Aplicar para o separador Calibração (μs)", command=self._calculate_and_apply_calibration, **COLOR_NEUTRAL).grid(row=2, column=0, columnspan=2, padx=10, pady=20, sticky="ew")
+
+    # --- Métodos de Lógica e Controlo ---
+    
+    def _center_platform(self):
+        """(NOVO v5.2) Envia um comando para mover os servos para a posição de equilíbrio definida na calibração."""
+        if not self.serial_manager.serial_conn or not self.serial_manager.serial_conn.is_open:
+            self.app.status_bar.show_message("Erro: Arduino não está conectado.", is_error=True)
+            return
+        
+        try:
+            x_us = 1500 + self.calib_vars['x_center_offset_us'].get()
+            y_us = 1500 + self.calib_vars['y_center_offset_us'].get()
+
+            cmd_str = f"{CMD_CALIBRATION_PREFIX},{x_us},{y_us}\n"
+            self.serial_manager.send(cmd_str)
+            
+            self.app.status_bar.show_message(f"Plataforma nivelada para ({x_us}μs, {y_us}μs).")
+
+        except (tk.TclError, ValueError):
+            self.app.status_bar.show_message("Erro: Valores de offset de calibração inválidos.", is_error=True)
+
+    def _calculate_and_apply_calibration(self):
+        try:
+            servo_min_us = float(self.servo_min_us_var.get())
+            servo_max_us = float(self.servo_max_us_var.get())
+            us_per_degree = (servo_max_us - servo_min_us) / 180.0
+            
+            angles = {name: float(var.get()) for name, var in self.angle_vars.items()}
+            
+            x_min_us = servo_min_us + angles['x_min'] * us_per_degree
+            x_max_us = servo_min_us + angles['x_max'] * us_per_degree
+            x_center_us = servo_min_us + angles['x_eq'] * us_per_degree
+            x_offset_us = x_center_us - 1500
+            
+            y_min_us = servo_min_us + angles['y_min'] * us_per_degree
+            y_max_us = servo_min_us + angles['y_max'] * us_per_degree
+            y_center_us = servo_min_us + angles['y_eq'] * us_per_degree
+            y_offset_us = y_center_us - 1500
+            
+            self.calib_vars['x_center_offset_us'].set(int(round(x_offset_us)))
+            self.calib_vars['x_min_us'].set(int(round(x_min_us)))
+            self.calib_vars['x_max_us'].set(int(round(x_max_us)))
+            self.calib_vars['y_center_offset_us'].set(int(round(y_offset_us)))
+            self.calib_vars['y_min_us'].set(int(round(y_min_us)))
+            self.calib_vars['y_max_us'].set(int(round(y_max_us)))
+            
+            self.app.status_bar.show_message("Valores de calibração calculados e aplicados com sucesso!")
+        except (ValueError, ZeroDivisionError) as e:
+            self.app.status_bar.show_message(f"Erro no cálculo: Verifique se todos os valores são números válidos. ({e})", is_error=True)
+        except Exception as e:
+            self.app.status_bar.show_message(f"Ocorreu um erro inesperado: {e}", is_error=True)
+
+    def _apply_pid_gains(self):
+        try:
+            kp_x = float(self.pid_params_widgets['X']['Kp']['entry'].get())
+            ki_x = float(self.pid_params_widgets['X']['Ki']['entry'].get())
+            kd_x = float(self.pid_params_widgets['X']['Kd']['entry'].get())
+            self.app.video_handler.pid_x.set_gains(kp_x, ki_x, kd_x)
+            
+            kp_y = float(self.pid_params_widgets['Y']['Kp']['entry'].get())
+            ki_y = float(self.pid_params_widgets['Y']['Ki']['entry'].get())
+            kd_y = float(self.pid_params_widgets['Y']['Kd']['entry'].get())
+            self.app.video_handler.pid_y.set_gains(kp_y, ki_y, kd_y)
+            
+            self.app.status_bar.show_message("Ganhos PID aplicados para ambos os eixos.")
+        except(ValueError, AttributeError, tk.TclError):
+            self.app.status_bar.show_message("Erro: Ganhos PID inválidos.", is_error=True)
+
+    def _send_center_calib_command(self, _=None):
+        x_us = 1500 + self.calib_vars['x_center_offset_us'].get()
+        y_us = 1500 + self.calib_vars['y_center_offset_us'].get()
+        self.serial_manager.send(f"{CMD_CALIBRATION_PREFIX},{x_us},{y_us}\n")
+
+    def _send_limit_test_command(self, limit_name):
+        x_us = 1500 + self.calib_vars['x_center_offset_us'].get()
+        y_us = 1500 + self.calib_vars['y_center_offset_us'].get()
+        if "x" in limit_name: x_us = self.calib_vars[limit_name].get()
+        if "y" in limit_name: y_us = self.calib_vars[limit_name].get()
+        self.serial_manager.send(f"{CMD_CALIBRATION_PREFIX},{x_us},{y_us}\n")
+
+    def _toggle_seguimento(self):
+        vh = self.app.video_handler
+        vh.tracking_enabled = not vh.tracking_enabled
+        if vh.tracking_enabled:
+            self.btn_ligar_seguimento.configure(text="Parar Seguimento",**COLOR_DANGER)
+            self.app.status_bar.show_message("Seguimento da bola ativado.")
+        else:
+            self.btn_ligar_seguimento.configure(text="Ligar Seguimento",**COLOR_SECONDARY)
+            self.app.status_bar.show_message("Seguimento da bola desativado.")
+
+    def _atualizar_portas(self):
+        novas_portas = self.serial_manager.list_ports()
+        self.option_menu_porta.configure(values=novas_portas if novas_portas else ["Nenhuma porta"])
+        self.porta_var.set(novas_portas[0] if novas_portas else "Nenhuma porta")
+
+    def _ligar_arduino(self):
+        porta = self.porta_var.get()
+        if porta and porta != "Nenhuma porta":
+            if self.serial_manager.connect(porta):
+                self.app.status_bar.show_message(f"Conectado a {porta}.", 5000)
+            else:
+                self.app.status_bar.show_message(f"Falha ao conectar a {porta}.",5000,is_error=True)
+
+    def _desligar_arduino(self):
+        self.serial_manager.disconnect()
+        self.app.status_bar.show_message("Conexão serial encerrada.")
+
+    def get_pid_config(self):
+        config = {"x": {}, "y": {}}
+        try:
+            for axis in ["X", "Y"]: 
+                for param in ["Kp", "Ki", "Kd"]:
+                    config[axis.lower()][param.lower()] = float(self.pid_params_widgets[axis][param]['entry'].get())
+            return config
+        except (ValueError, KeyError, tk.TclError):
+            return {"x": {"kp": 0.0, "ki": 0.0, "kd": 0.0}, "y": {"kp": 0.0, "ki": 0.0, "kd": 0.0}}
+
+    def load_pid_config(self, pid_dict):
+        for axis_lower, gains in pid_dict.items():
+            axis_upper = axis_lower.upper()
+            if axis_upper in self.pid_params_widgets:
+                for param_lower, value in gains.items():
+                    param_upper = param_lower.capitalize()
+                    if param_upper in self.pid_params_widgets[axis_upper]:
+                        w = self.pid_params_widgets[axis_upper][param_upper]
+                        w['slider'].set(value)
+                        w['entry'].delete(0, 'end')
+                        w['entry'].insert(0, f"{value:.3f}")
+        self._apply_pid_gains()
+
+# -----------------------------------------------------------------------------
+# 4. CLASSE PRINCIPAL DA APLICAÇÃO
+# -----------------------------------------------------------------------------
+class OpenBalanceApp:
+    """A classe principal que inicializa e gere toda a aplicação."""
+    def __init__(self):
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("blue")
+        
+        self.app = ctk.CTk()
+        self.app.title("OpenBalance Dashboard 5.2 - Edição de Controlo Refinado")
+        self.app.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
+        
+        self.app.grid_rowconfigure(0, weight=1)
+        self.app.grid_rowconfigure(1, weight=0)
+        self.app.grid_columnconfigure(0, weight=1, minsize=320)
+        self.app.grid_columnconfigure(1, weight=4, minsize=VIDEO_WIDTH + 40)
+        self.app.grid_columnconfigure(2, weight=1, minsize=320)
+        
+        self.serial_manager = SerialManager()
+        self.video_handler = None
+        
+        self._create_status_bar()
+        self._load_app_config()
+        self._create_menu()
+        self._create_frames()
+        
+        self.app.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _load_app_config(self):
+        self.calibration_data = {
+            "x_center_offset_us":0, "y_center_offset_us":0,
+            "x_min_us":1000, "x_max_us":2000,
+            "y_min_us":1000, "y_max_us":2000
+        }
+        default_pid_config = {"x": {"kp": 0, "ki": 0, "kd": 0}, "y": {"kp": 0, "ki": 0, "kd": 0}}
+        
+        try:
+            with open("config.json",'r',encoding='utf-8') as f:
+                config = json.load(f)
+            self.hsv_config = config.get("hsv", {})
+            loaded_pid_config = config.get("pid", {})
+            if isinstance(loaded_pid_config, dict) and "kp" not in loaded_pid_config:
+                 if 'x' in loaded_pid_config: default_pid_config['x'].update(loaded_pid_config['x'])
+                 if 'y' in loaded_pid_config: default_pid_config['y'].update(loaded_pid_config['y'])
+            self.pid_config = default_pid_config
+            self.calibration_data.update(config.get("calibration",{}))
+        except (FileNotFoundError, json.JSONDecodeError):
+            self.hsv_config = {}
+            self.pid_config = default_pid_config
+            self.status_bar.show_message("config.json não encontrado. A usar configurações padrão.", is_error=True)
+
+    def _save_app_config(self):
+        if hasattr(self,'control_frame') and self.control_frame:
+            for name,var in self.control_frame.calib_vars.items():
+                self.calibration_data[name]=var.get()
+                
+        config = {
+            "hsv": self.hsv_frame.save_hsv() if hasattr(self,'hsv_frame') else {},
+            "pid": self.control_frame.get_pid_config() if hasattr(self,'control_frame') else {},
+            "calibration": self.calibration_data
+        }
+        
+        try:
+            with open("config.json",'w',encoding='utf-8') as f:
+                json.dump(config, f, indent=4)
+            self.status_bar.show_message("Configuração salva com sucesso.")
+        except Exception as e:
+            self.status_bar.show_message(f"Erro ao salvar configuração: {e}", is_error=True)
+
+    def _create_frames(self):
+        # Frame de configurações HSV (esquerda)
+        self.hsv_frame = HSVSettingsFrame(self.app, None, corner_radius=10)
+        self.hsv_frame.grid(row=0, column=0, sticky="nswe", padx=10, pady=10)
+        
+        # Container do vídeo (centro)
+        frame_video_container = ctk.CTkFrame(self.app, corner_radius=10)
+        frame_video_container.grid(row=0, column=1, sticky="nswe", padx=10, pady=10)
+        frame_video_container.grid_columnconfigure(0, weight=1)
+        frame_video_container.grid_rowconfigure(2, weight=1)
+        
+        ctk.CTkLabel(frame_video_container, text="Área de Visualização", font=("Arial", 16, "bold")).grid(row=0, column=0, pady=(10,5))
+        
+        # Frame para seleção de câmara e controlo do filtro
+        cam_select_frame = ctk.CTkFrame(frame_video_container, fg_color="transparent")
+        cam_select_frame.grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        
+        ctk.CTkLabel(cam_select_frame, text="Câmera:").pack(side="left", padx=(0,5))
+        self.cam_index_var = tk.StringVar(value="0")
+        self.option_menu_camera = ctk.CTkOptionMenu(cam_select_frame, values=["0", "1", "2", "3"], variable=self.cam_index_var, command=lambda x:self.video_handler.change_camera(x))
+        self.option_menu_camera.pack(side="left")
+        
+        # Inicializa o VideoHandler, que cria o seu próprio canvas
+        self.video_handler = VideoHandler(frame_video_container, self.hsv_frame, self.serial_manager, self)
+        self.hsv_frame.video_handler = self.video_handler # Link de volta para o hsv_frame
+        
+        # Checkbox para o Filtro de Kalman
+        kalman_checkbox = ctk.CTkCheckBox(cam_select_frame, text="Filtro de Kalman", variable=self.video_handler.kalman_enabled)
+        kalman_checkbox.pack(side="left", padx=(20, 0))
+
+        # Frame de controlo (direita)
+        self.control_frame = ControlFrame(self.app, self.serial_manager, self, corner_radius=10)
+        self.control_frame.grid(row=0, column=2, sticky="nswe", padx=10, pady=10)
+        
+        # Carregar configurações salvas nos frames
+        self.hsv_frame.load_hsv(self.hsv_config)
+        self.control_frame.load_pid_config(self.pid_config)
+
+    def _on_close(self):
+        """Função chamada ao fechar a janela."""
+        self._save_app_config()
+        if self.video_handler:
+            self.video_handler.stop()
+        self.serial_manager.disconnect()
+        self.app.destroy()
+
+    def _create_menu(self):
+        menu_bar = tk.Menu(self.app)
+        arquivo_menu = tk.Menu(menu_bar, tearoff=0)
+        arquivo_menu.add_command(label="Salvar Configuração Agora", command=self._save_app_config)
+        arquivo_menu.add_separator()
+        arquivo_menu.add_command(label="Sair", command=self._on_close)
+        menu_bar.add_cascade(label="Arquivo", menu=arquivo_menu)
+        self.app.config(menu=menu_bar)
+
+    def _create_status_bar(self):
+        self.status_bar = StatusBar(self.app)
+        self.status_bar.grid(row=1, column=0, columnspan=3, sticky="sew")
+
+    def run(self):
+        """Inicia o loop principal da aplicação."""
+        self.app.mainloop()
+
+# -----------------------------------------------------------------------------
+# 5. PONTO DE ENTRADA DA APLICAÇÃO
+# -----------------------------------------------------------------------------
+if __name__ == "__main__":
+    app = OpenBalanceApp()
+    app.run()

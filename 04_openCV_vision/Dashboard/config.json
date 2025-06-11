@@ -2,10 +2,10 @@
     "hsv": {
         "h_min": 10,
         "h_max": 25,
-        "s_min": 100,
-        "s_max": 255,
-        "v_min": 85,
-        "v_max": 229
+        "s_min": 77,
+        "s_max": 184,
+        "v_min": 175,
+        "v_max": 236
     },
     "pid": {
         "Kp": 0.0,
@@ -13,11 +13,11 @@
         "Kd": 0.0
     },
     "calibration": {
-        "x_center_offset_us": 0,
-        "y_center_offset_us": 0,
-        "x_min_us": 1000,
-        "x_max_us": 2000,
-        "y_min_us": 1000,
-        "y_max_us": 2000
+        "x_center_offset_us": -44,
+        "y_center_offset_us": -56,
+        "x_min_us": 1333,
+        "x_max_us": 1556,
+        "y_min_us": 1306,
+        "y_max_us": 1583
     }
 }
