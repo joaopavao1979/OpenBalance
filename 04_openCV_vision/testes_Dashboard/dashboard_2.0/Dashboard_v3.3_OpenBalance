@@ -28,7 +28,7 @@ WINDOW_WIDTH = 1280  # ALTERADO: Largura aumentada para acomodar melhor os pain√
 WINDOW_HEIGHT = 720 # ALTERADO: Altura aumentada para a barra de status
 VIDEO_WIDTH = 640
 VIDEO_HEIGHT = 480
-DEFAULT_BAUDRATE = 9600
+DEFAULT_BAUDRATE = 115200
 CONFIG_FILE_TYPES = [("JSON Files", "*.json")]
 CSV_FILE_TYPES = [("CSV Files", "*.csv")]
 

@@ -24,7 +24,7 @@ const uint8_t CHANNEL_X = 0;
 const uint8_t CHANNEL_Y = 1;
 
 // Frequência do PWM
-const int PWM_FREQ = 100;  // Hz (100 Hz recomendado para servos digitais)
+const int PWM_FREQ = 1;  // Hz (100 Hz recomendado para servos digitais)
 
 // Ganhos PID (ajuste conforme necessário)
 const float Kp = 1.2;
