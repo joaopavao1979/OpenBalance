@@ -336,12 +336,12 @@ class VideoHandler:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6,
                     (255, 255, 255), 2, cv2.LINE_AA
                 )
-        # Cruz original amarela (centro da imagem)
-        cv2.line(display_img, (width//2 - 10, height//2), (width//2 + 10, height//2), (255, 255, 0), 1)
-        cv2.line(display_img, (width//2, height//2 - 10), (width//2, height//2 + 10), (255, 255, 0), 1)
+        # Cruz original amarela ou vermelho(centro da imagem)
+        cv2.line(display_img, (width//2 - 10, height//2), (width//2 + 10, height//2), (255, 0, 0), 4)
+        cv2.line(display_img, (width//2, height//2 - 10), (width//2, height//2 + 10), (255, 0, 0), 4)
 
-        # Círculo rosa (magenta) no centro clicado
-        cv2.circle(display_img, (center_x, center_y), 5, (255, 0, 255), -1)  # raio 5, preenchido
+        # Círculo azul  no centro clicado
+        cv2.circle(display_img, (center_x, center_y), 5, (0, 0, 255), -1)  # raio 5, preenchido
         return display_img
 
 

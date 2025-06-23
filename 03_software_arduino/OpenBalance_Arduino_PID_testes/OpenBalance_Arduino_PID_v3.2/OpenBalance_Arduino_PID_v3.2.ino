@@ -7,13 +7,13 @@
 // =====================
 
 // === PARÂMETROS DE CALIBRAÇÃO (preencha após montagem) ===
-const int ANG_EQUIL_X  =  75;
-const int ANG_MIN_X    =  60;
-const int ANG_MAX_X    =  100;
+const int ANG_EQUIL_X  =  90;
+const int ANG_MIN_X    =  75;
+const int ANG_MAX_X    =  105;
 
-const int ANG_EQUIL_Y  =  70;
-const int ANG_MIN_Y    =  60;
-const int ANG_MAX_Y    =  90;
+const int ANG_EQUIL_Y  =  77;
+const int ANG_MIN_Y    =  65;
+const int ANG_MAX_Y    =  95;
 
 const int PULSE_MIN_US = 1000;
 const int PULSE_MAX_US = 2000;
@@ -24,8 +24,8 @@ const uint8_t CHANNEL_Y = 1;
 const int PWM_FREQ = 50;
 
 // Ganhos PID (ajuste conforme necessário)
-const float Kp_X = 0.3, Ki_X = 0.001, Kd_X = 0.2;
-const float Kp_Y = 0.15, Ki_Y = 0.02, Kd_Y = 0.2;
+const float Kp_X = 0.18, Ki_X = 0.015, Kd_X = 0.07;
+const float Kp_Y = 0.14, Ki_Y = 0.015, Kd_Y = 0.05;
 const float SUM_MAX = 300.0;
 const float D_ALPHA = 0.8;
 

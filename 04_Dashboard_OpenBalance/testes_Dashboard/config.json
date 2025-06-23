@@ -25,6 +25,8 @@
         "x_min_us": 1333,
         "x_max_us": 1667,
         "y_min_us": 1278,
-        "y_max_us": 1611
+        "y_max_us": 1611,
+        "invert_x": false,
+        "invert_y": false
     }
 }
