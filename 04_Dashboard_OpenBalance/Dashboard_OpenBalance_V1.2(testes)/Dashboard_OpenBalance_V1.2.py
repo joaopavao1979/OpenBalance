@@ -2,31 +2,34 @@
 ===============================================================================
 Projeto: OpenBalance – Dashboard Python com Visão e Controlo PID
 
-Ficheiro: Dashboard_OpenBalance_V1.1_Trajectory.py
+Ficheiro: Dashboard_OpenBalance_V1.2_IntegratedGraphs.py
 
 Descrição: Interface gráfica para controlo em tempo real de uma plataforma
            equilibradora de bola, com deteção por OpenCV e controlo PID via Arduino.
 
 Autor: João Pavão
 
-Data: 22/06/2025
+Data: 23/06/2025
 
 Disciplina: Laboratório de Aplicações em Robótica e Aprendizagem (PRIA)
 Instituição: Universidade dos Açores
 Licença: MIT License
 
 ===============================================================================
-Notas da versão 1.1:
-- Integra uma janela de gráficos com duas visualizações paralelas:
-  1. Gráfico de Erros (X/Y vs. Tempo) – útil para análise e afinação de PID.
-  2. Gráfico de Trajetória 2D (Y vs. X) – representação espacial da bola.
+Notas da versão 1.2:
+- GRÁFICOS INTEGRADOS: Os gráficos de "Erro vs. Tempo" e "Trajetória 2D" foram
+  integrados diretamente na janela principal da dashboard, eliminando a janela
+  pop-up para uma visualização mais centralizada e permanente.
+- O botão "Ver Gráfico" foi removido, pois os gráficos estão agora sempre visíveis.
+- Otimização do layout da UI para acomodar os novos elementos gráficos de forma
+  harmónica.
 - Interface robusta com ajuste de HSV, seleção de câmaras, comandos de controlo,
   e visualização clara da posição da bola e do alvo.
 - Comunicação com Arduino através de comandos: M1 (motores ON), M0 (OFF), E,x,y (erro).
 ===============================================================================
 
 # Índice de Estrutura e Comentários do Código
-Este índice resume a organização da aplicação `Dashboard_OpenBalance_V1.1_Trajectory.py`,
+Este índice resume a organização da aplicação `Dashboard_OpenBalance_V1.2_IntegratedGraphs.py`,
 facilitando a navegação por classes e blocos principais.
 
 Estrutura modular:
@@ -38,12 +41,12 @@ Estrutura modular:
 | 3.1    | SerialManager              | Gestão da comunicação serial                           |
 | 3.2    | RealTimePlotFrame          | Gráfico PID (erro X/Y vs. tempo)                       |
 | 3.2.1  | TrajectoryPlotFrame        | Gráfico 2D com origem centrada (posição Y vs. X)       |
-| 3.2.2  | PlotWindow                 | Janela com ambos os gráficos                           |
+| 3.2.2  | PlotWindow                 | ### REMOVIDA ### Classe da janela pop-up                 |
 | 3.3    | HSVSettingsFrame           | Sliders de HSV com presets interativos                 |
 | 3.4    | SystemControlFrame         | Botões de controlo e ligação à porta COM               |
 | 3.5    | VideoHandler               | Captura, processamento de vídeo e envio de erros       |
 | 3.6    | StatusBar                  | Mensagens temporárias no rodapé                        |
-| 4      | OpenBalanceApp             | Classe principal da aplicação                          |
+| 4      | OpenBalanceApp             | Classe principal da aplicação (layout alterado)        |
 | 5      | if __name__ == "__main__"  | Entrada principal da aplicação (executável)            |
 ================================================================================================
 """
@@ -74,8 +77,8 @@ import matplotlib.pyplot as plt  # Matplotlib para a criação de gráficos
 # 2. CONSTANTES E CONFIGURAÇÕES GLOBAIS
 # =============================================================================
 # --- Dimensões da UI ---
-WINDOW_WIDTH = 1280
-WINDOW_HEIGHT = 720
+WINDOW_WIDTH = 1480 # ### ALTERADO ### - Aumentado para acomodar os gráficos
+WINDOW_HEIGHT = 800 # ### ALTERADO ### - Aumentado para acomodar os gráficos
 VIDEO_WIDTH = 640
 VIDEO_HEIGHT = 480
 
@@ -158,7 +161,8 @@ class RealTimePlotFrame(ctk.CTkFrame):
         self.data_y = deque(maxlen=max_points)
         self.timestamps = deque(maxlen=max_points)
         self.start_time = time.time()
-        self.fig, self.ax = plt.subplots(figsize=(5, 3))
+        # ### ALTERADO ### - Ajustado o figsize para caber melhor na UI integrada
+        self.fig, self.ax = plt.subplots(figsize=(4, 2.5))
         self.fig.patch.set_facecolor('#2B2B2B')
         self.ax.set_facecolor('#2B2B2B')
         self.ax.tick_params(axis='x', colors='white')
@@ -169,13 +173,14 @@ class RealTimePlotFrame(ctk.CTkFrame):
         self.ax.title.set_color('white')
         self.line_x, = self.ax.plot([], [], label="Erro X", color='#E53935')
         self.line_y, = self.ax.plot([], [], label="Erro Y", color='#1E88E5')
-        legend = self.ax.legend(loc="upper right", facecolor='#333333', edgecolor='white')
+        legend = self.ax.legend(loc="upper right", facecolor='#333333', edgecolor='white', fontsize='small')
         for text in legend.get_texts(): text.set_color("white")
         self.ax.set_ylim(-350, 350)
         self.ax.set_xlim(0, 10)
         self.ax.set_title("Erro vs. Tempo")
         self.ax.set_xlabel("Tempo (s)")
         self.ax.set_ylabel("Erro (pixels)")
+        self.fig.tight_layout(pad=0.5) # Garante que os rótulos não são cortados
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)
         self.canvas_widget = self.canvas.get_tk_widget()
         self.canvas_widget.pack(fill="both", expand=True)
@@ -199,7 +204,7 @@ class RealTimePlotFrame(ctk.CTkFrame):
 
 
 # -----------------------------------------------------------------------------
-# 3.2.1. ### NOVO ### MÓDULO DE GRÁFICO DE TRAJETÓRIA
+# 3.2.1. MÓDULO DE GRÁFICO DE TRAJETÓRIA
 # -----------------------------------------------------------------------------
 class TrajectoryPlotFrame(ctk.CTkFrame):
     """
@@ -210,8 +215,9 @@ class TrajectoryPlotFrame(ctk.CTkFrame):
 
         self.trajectory_x = deque(maxlen=max_points)
         self.trajectory_y = deque(maxlen=max_points)
-
-        self.fig, self.ax = plt.subplots(figsize=(5, 4))
+        
+        # ### ALTERADO ### - Ajustado o figsize para caber melhor na UI integrada
+        self.fig, self.ax = plt.subplots(figsize=(4, 3))
         self.fig.patch.set_facecolor('#2B2B2B')
         self.ax.set_facecolor('#2B2B2B')
         self.ax.tick_params(axis='x', colors='white')
@@ -223,19 +229,11 @@ class TrajectoryPlotFrame(ctk.CTkFrame):
 
         # Cria os elementos do gráfico: trajetória, posição atual e alvo
         self.trajectory_line, = self.ax.plot([], [], color='yellow', linewidth=1, label='Trajetória')
-        self.current_pos_marker, = self.ax.plot([], [], 'o', markersize=12, color='lime', label='Pos. Atual')
-        self.target_pos_marker, = self.ax.plot([], [], 'o', markersize=12, color='blue', markeredgewidth=2, label='Alvo')
+        self.current_pos_marker, = self.ax.plot([], [], 'o', markersize=8, color='lime', label='Pos. Atual')
+        self.target_pos_marker, = self.ax.plot([], [], 'o', markersize=8, color='blue', markeredgewidth=2, label='Alvo')
         
-        # Cruz branca no centro da imagem (referência visual)
-        self.center_marker, = self.ax.plot(
-            [VIDEO_WIDTH // 2],
-            [VIDEO_HEIGHT // 2],
-            marker='+',
-            color='red',
-            markersize=12,
-            linewidth=10,
-            label='Centro'
-        )
+        # Cruz vermelha no centro da imagem (referência visual)
+        self.center_marker, = self.ax.plot([VIDEO_WIDTH // 2], [VIDEO_HEIGHT // 2], marker='+', color='red', markersize=12, markeredgewidth=2, label='Centro')
 
         # Configura limites e eixos
         self.ax.set_title("Trajetória da Bola (Vista de Cima)")
@@ -245,6 +243,7 @@ class TrajectoryPlotFrame(ctk.CTkFrame):
         self.ax.set_ylim(VIDEO_HEIGHT, 0)
         self.ax.grid(True, which='both', linestyle='--', linewidth=0.5)
         self.ax.set_aspect('equal', adjustable='box') # Garante que o gráfico seja quadrado
+        self.fig.tight_layout(pad=0.5) # Garante que os rótulos não são cortados
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)
         self.canvas_widget = self.canvas.get_tk_widget()
@@ -267,37 +266,11 @@ class TrajectoryPlotFrame(ctk.CTkFrame):
         # Usa draw_idle para uma atualização mais eficiente
         self.canvas.draw_idle()
 
-
 # -----------------------------------------------------------------------------
-# 3.2.2. ### ALTERADO ### JANELA DE GRÁFICOS COMBINADA
+# 3.2.2. ### REMOVIDO ### JANELA DE GRÁFICOS COMBINADA
+# A classe PlotWindow foi removida pois os gráficos agora são integrados
+# diretamente na janela principal (OpenBalanceApp).
 # -----------------------------------------------------------------------------
-class PlotWindow(ctk.CTkToplevel):
-    """
-    Janela pop-up que combina o gráfico de erro e o gráfico de trajetória.
-    """
-    def __init__(self, master, *args, **kwargs):
-        super().__init__(master, *args, **kwargs)
-        self.title("Análise Gráfica em Tempo Real")
-        self.geometry("1100x550") # Tamanho ajustado para dois gráficos
-        
-        # Grelha com 2 colunas, ambas com o mesmo peso
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=1)
-
-        # Gráfico de Erro vs. Tempo (esquerda)
-        self.plot_frame_error = RealTimePlotFrame(self)
-        self.plot_frame_error.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
-
-        # Gráfico de Trajetória (direita)
-        self.plot_frame_trajectory = TrajectoryPlotFrame(self)
-        self.plot_frame_trajectory.grid(row=0, column=1, padx=(5, 10), pady=10, sticky="nsew")
-
-        self.protocol("WM_DELETE_WINDOW", self.hide_window)
-
-    def hide_window(self):
-        self.withdraw()
-
 
 # -----------------------------------------------------------------------------
 # 3.3. MÓDULO DE INTERFACE: PAINEL DE CONFIGURAÇÕES HSV
@@ -352,7 +325,7 @@ class HSVSettingsFrame(ctk.CTkFrame):
         return {"h_min": int(lower[0]), "h_max": int(upper[0]), "s_min": int(lower[1]), "s_max": int(upper[1]), "v_min": int(lower[2]), "v_max": int(upper[2])}
 
 # -----------------------------------------------------------------------------
-# 3.4. MÓDULO DE INTERFACE: PAINEL DE CONTROLO DO SISTEMA
+# 3.4. ### ALTERADO ### MÓDULO DE INTERFACE: PAINEL DE CONTROLO DO SISTEMA
 # -----------------------------------------------------------------------------
 class SystemControlFrame(ctk.CTkFrame):
     def __init__(self, parent, serial_manager: SerialManager, app_ref, *args, **kwargs):
@@ -367,7 +340,10 @@ class SystemControlFrame(ctk.CTkFrame):
         self.btn_ligar_seguimento = ctk.CTkButton(motor_group, text="Ligar Seguimento", command=self._toggle_seguimento, **COLOR_SECONDARY)
         self.btn_ligar_seguimento.grid(row=1, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
         ctk.CTkButton(motor_group, text="Reset Centro", command=self._reset_centro_manual, fg_color="#AA00AA", hover_color="#880088").grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
-        ctk.CTkButton(motor_group, text="Ver Gráfico", command=self.app._show_plot_window, **COLOR_INFO).grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
+        
+        # ### REMOVIDO ### O botão "Ver Gráfico" foi removido pois os gráficos estão agora integrados.
+        # ctk.CTkButton(motor_group, text="Ver Gráfico", command=self.app._show_plot_window, **COLOR_INFO).grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
+        
         serial_group = ctk.CTkFrame(self, fg_color="transparent"); serial_group.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
         serial_group.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(serial_group, text="Comunicação Arduino", font=("Arial", 18, "bold")).grid(row=0, column=0, columnspan=2, pady=(5, 10))
@@ -408,7 +384,7 @@ class SystemControlFrame(ctk.CTkFrame):
     def load_pid_config(self, pid_dict): pass
 
 # -----------------------------------------------------------------------------
-# 3.5. ### ALTERADO ### MÓDULO DE VÍDEO E PROCESSAMENTO DE IMAGEM
+# 3.5. MÓDULO DE VÍDEO E PROCESSAMENTO DE IMAGEM
 # -----------------------------------------------------------------------------
 class VideoHandler:
     def __init__(self, parent, hsv_frame_ref: HSVSettingsFrame, serial_manager: SerialManager, error_queue: queue.Queue, camera_index=0):
@@ -439,17 +415,13 @@ class VideoHandler:
         with self.shared_lock: return self._tracking_enabled_internal
     def reset_center(self):
         with self.shared_lock: self.center_x, self.center_y = VIDEO_WIDTH // 2, VIDEO_HEIGHT // 2
-    #def _on_mouse_click(self, event):
-        #with self.shared_lock: self.center_x, self.center_y = event.x, event.y
     def _on_mouse_click(self, event):
         canvas_w, canvas_h = 768, 576  # Tamanho da imagem redimensionada
         scale_x = VIDEO_WIDTH / canvas_w
         scale_y = VIDEO_HEIGHT / canvas_h
-
         with self.shared_lock:
             self.center_x = int(event.x * scale_x)
             self.center_y = int(event.y * scale_y)
-
     def _initialize_camera(self):
         if self.cap and self.cap.isOpened():
             self.running = False
@@ -473,7 +445,6 @@ class VideoHandler:
             except queue.Full:
                 pass
         self.running = False
-
     def _process_frame_for_display(self, frame_bgr):
         height, width, _ = frame_bgr.shape
         with self.shared_lock:
@@ -487,13 +458,13 @@ class VideoHandler:
         
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         erro_x, erro_y = 0, 0
-        ball_pos = None # ### NOVO ###: Inicializa a posição da bola como Nula
+        ball_pos = None
 
         if contours:
             c = max(contours, key=cv2.contourArea)
             if cv2.contourArea(c) > 500:
                 (x, y), radius = cv2.minEnclosingCircle(c)
-                ball_pos = (int(x), int(y)) # ### NOVO ###: Guarda a posição da bola
+                ball_pos = (int(x), int(y))
                 erro_x, erro_y = ball_pos[0] - center_x, -(ball_pos[1] - center_y)
 
                 if tracking and self.serial_manager.serial_conn:
@@ -506,19 +477,15 @@ class VideoHandler:
                 cv2.circle(display_img, ball_pos, 3, (255, 0, 0), -1)
                 cv2.putText(display_img, f"Erro X: {erro_x:+d}, Y: {erro_y:+d}", (10, height - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
         
-        # ### ALTERADO ###: Envia um pacote de dados mais completo para a queue
         target_pos = (center_x, center_y)
         try:
-            # Pacote: (erro_x, erro_y, pos_bola, pos_alvo)
             self.error_queue.put_nowait((erro_x, erro_y, ball_pos, target_pos))
         except queue.Full:
             pass
-
         cv2.line(display_img, (width//2 - 10, height//2), (width//2 + 10, height//2), (255, 0, 0), 4)
         cv2.line(display_img, (width//2, height//2 - 10), (width//2, height//2 + 10), (255, 0, 0), 4)
         cv2.circle(display_img, (center_x, center_y), 5, (0, 0, 255), -1)
         return display_img
-
     def _update_canvas_from_queue(self):
         try:
             frame = self.frame_queue.get_nowait()
@@ -560,19 +527,32 @@ class StatusBar(ctk.CTkFrame):
         self._job = self.after(duration_ms, lambda: self.label.configure(text=""))
 
 # =============================================================================
-# 4. CLASSE PRINCIPAL DA APLICAÇÃO
+# 4. ### ALTERADO ### CLASSE PRINCIPAL DA APLICAÇÃO
 # =============================================================================
 class OpenBalanceApp:
     def __init__(self):
         ctk.set_appearance_mode("dark"); ctk.set_default_color_theme("dark-blue")
-        self.app = ctk.CTk(); self.app.title("OpenBalance Dashboard"); self.app.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
-        self.app.grid_rowconfigure(0, weight=1); self.app.grid_rowconfigure(1, weight=0); self.app.grid_columnconfigure(0, weight=1)
-        self.app.grid_columnconfigure(1, weight=3); self.app.grid_columnconfigure(2, weight=1)
-        self.serial_manager = SerialManager(); self.video_handler = None
-        self.plot_window = None
+        self.app = ctk.CTk(); self.app.title("OpenBalance Dashboard v1.2"); self.app.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
+        
+        # ### ALTERADO ### - Configuração da grelha principal para acomodar todos os painéis
+        self.app.grid_rowconfigure(0, weight=1)
+        self.app.grid_rowconfigure(1, weight=0) # Barra de status
+        self.app.grid_columnconfigure(0, weight=1) # Painel HSV
+        self.app.grid_columnconfigure(1, weight=3) # Painel Vídeo
+        self.app.grid_columnconfigure(2, weight=1) # Painel Controlo + Gráficos
+
+        self.serial_manager = SerialManager()
+        self.video_handler = None
         self.error_queue = queue.Queue()
-        self._create_menu(); self._create_frames(); self._create_status_bar()
-        self._process_error_queue() 
+
+        # ### NOVO ### - Referências diretas aos frames dos gráficos
+        self.plot_frame_error = None
+        self.plot_frame_trajectory = None
+
+        self._create_menu()
+        self._create_frames()
+        self._create_status_bar()
+        self._process_error_queue()
         self.app.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _create_menu(self):
@@ -591,20 +571,51 @@ class OpenBalanceApp:
         self.app.config(menu=menu)
 
     def _create_status_bar(self):
-        self.status_bar = StatusBar(self.app); self.status_bar.grid(row=1, column=0, columnspan=3, sticky="sew")
+        self.status_bar = StatusBar(self.app)
+        self.status_bar.grid(row=1, column=0, columnspan=3, sticky="sew")
 
     def _create_frames(self):
-        video_container = ctk.CTkFrame(self.app, corner_radius=10); video_container.grid(row=0, column=1, sticky="nswe", padx=10, pady=10)
-        video_container.grid_rowconfigure(2, weight=1); video_container.grid_columnconfigure(0, weight=1)
+        # --- PAINEL ESQUERDO: HSV ---
+        self.hsv_frame = HSVSettingsFrame(self.app, video_handler=None)
+        self.hsv_frame.grid(row=0, column=0, sticky="nswe", padx=10, pady=10)
+
+        # --- PAINEL CENTRAL: VÍDEO ---
+        video_container = ctk.CTkFrame(self.app, corner_radius=10)
+        video_container.grid(row=0, column=1, sticky="nswe", padx=10, pady=10)
+        video_container.grid_rowconfigure(2, weight=1)
+        video_container.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(video_container, text="Área de Visualização", font=("Arial", 22, "bold")).grid(row=0, column=0, pady=(10,5))
-        cam_frame = ctk.CTkFrame(video_container, fg_color="transparent"); cam_frame.grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        cam_frame = ctk.CTkFrame(video_container, fg_color="transparent")
+        cam_frame.grid(row=1, column=0, padx=10, pady=5, sticky="w")
         ctk.CTkLabel(cam_frame, text="Câmera:").pack(side="left", padx=(0, 5))
         self.cam_var = tk.StringVar(value="0")
         ctk.CTkOptionMenu(cam_frame, values=["0", "1", "2", "3"], variable=self.cam_var, command=self._on_camera_change).pack(side="left")
-        self.hsv_frame = HSVSettingsFrame(self.app, video_handler=None); self.hsv_frame.grid(row=0, column=0, sticky="nswe", padx=10, pady=10)
-        self.control_frame = SystemControlFrame(self.app, self.serial_manager, app_ref=self); self.control_frame.grid(row=0, column=2, sticky="nswe", padx=10, pady=10)
+
+        # --- PAINEL DIREITO: CONTROLO E GRÁFICOS ---
+        # ### NOVO ### - Container para a coluna da direita
+        right_panel = ctk.CTkFrame(self.app, fg_color="transparent")
+        right_panel.grid(row=0, column=2, sticky="nswe", padx=10, pady=10)
+        right_panel.grid_columnconfigure(0, weight=1)
+        right_panel.grid_rowconfigure(0, weight=0) # Controlo (tamanho fixo)
+        right_panel.grid_rowconfigure(1, weight=1) # Gráfico 1 (expansível)
+        right_panel.grid_rowconfigure(2, weight=1) # Gráfico 2 (expansível)
+        
+        # Painel de Controlo (no topo do right_panel)
+        self.control_frame = SystemControlFrame(right_panel, self.serial_manager, app_ref=self)
+        self.control_frame.grid(row=0, column=0, sticky="new", pady=(0,10))
+
+        # Gráfico de Erro (no meio do right_panel)
+        self.plot_frame_error = RealTimePlotFrame(right_panel, corner_radius=10)
+        self.plot_frame_error.grid(row=1, column=0, sticky="nsew", pady=(0,10))
+        
+        # Gráfico de Trajetória (em baixo no right_panel)
+        self.plot_frame_trajectory = TrajectoryPlotFrame(right_panel, corner_radius=10)
+        self.plot_frame_trajectory.grid(row=2, column=0, sticky="nsew")
+
+        # --- Inicialização do VideoHandler depois dos frames estarem prontos ---
         self.video_handler = VideoHandler(video_container, self.hsv_frame, self.serial_manager, self.error_queue, int(self.cam_var.get()))
         self.hsv_frame.video_handler = self.video_handler
+
 
     def _on_camera_change(self, index):
         if self.video_handler: self.video_handler.change_camera(index)
@@ -630,31 +641,27 @@ class OpenBalanceApp:
         except Exception as e: self.status_bar.show_message(f"Erro ao carregar: {e}", is_error=True)
 
     def _mostrar_sobre(self):
-        messagebox.showinfo("Sobre o Projeto", "OpenBalance Dashboard\nVersão 1.1\nControlo PID com visão computacional.\nJoão Pavão – Universidade dos Açores")
+        messagebox.showinfo("Sobre o Projeto", "OpenBalance Dashboard\nVersão 1.2\nControlo PID com visão computacional.\nJoão Pavão – Universidade dos Açores")
 
     def _mostrar_manual(self):
-        messagebox.showinfo("Manual de Utilização", "1. Ligue o Arduino e selecione a porta COM\n2. Clique em 'Ligar Motores'\n3. Ajuste os parâmetros HSV\n4. Clique em 'Ligar Seguimento' para iniciar o controlo\n5. Use 'Ver Gráfico' para análise de erros e trajetória.")
+        messagebox.showinfo("Manual de Utilização", "1. Ligue o Arduino e selecione a porta COM\n2. Clique em 'Ligar Motores'\n3. Ajuste os parâmetros HSV\n4. Clique em 'Ligar Seguimento' para iniciar o controlo\n5. Use os gráficos integrados para análise de erros e trajetória.")
 
     def _mostrar_creditos(self):
         messagebox.showinfo("Créditos", "Desenvolvido por João Pavão\nSupervisão: PRIA - Universidade dos Açores\nLicença: MIT License")
 
-    def _show_plot_window(self):
-        if self.plot_window is None:
-            self.plot_window = PlotWindow(self.app)
-            self.plot_window.withdraw()
-        if not self.plot_window.winfo_viewable():
-             self.plot_window.deiconify()
-        self.plot_window.lift()
+    # ### REMOVIDO ### O método para mostrar a janela pop-up já não é necessário.
+    # def _show_plot_window(self): ...
 
-    # ### ALTERADO ###: Processa a queue com os novos dados de posição
+    # ### ALTERADO ###: Processa a queue e envia os dados para os gráficos integrados.
     def _process_error_queue(self):
         try:
             while not self.error_queue.empty():
                 erro_x, erro_y, ball_pos, target_pos = self.error_queue.get_nowait()
-                if self.plot_window and self.plot_window.winfo_viewable():
+                # Verifica se os frames dos gráficos já foram inicializados
+                if self.plot_frame_error and self.plot_frame_trajectory:
                     # Envia os dados para os gráficos correspondentes
-                    self.plot_window.plot_frame_error.add_data_point(erro_x, erro_y)
-                    self.plot_window.plot_frame_trajectory.update_plot(ball_pos, target_pos)
+                    self.plot_frame_error.add_data_point(erro_x, erro_y)
+                    self.plot_frame_trajectory.update_plot(ball_pos, target_pos)
         except queue.Empty:
             pass
         finally:

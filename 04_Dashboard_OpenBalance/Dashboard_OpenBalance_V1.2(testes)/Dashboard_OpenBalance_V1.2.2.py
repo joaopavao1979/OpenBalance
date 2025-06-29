@@ -2,31 +2,37 @@
 ===============================================================================
 Projeto: OpenBalance – Dashboard Python com Visão e Controlo PID
 
-Ficheiro: Dashboard_OpenBalance_V1.1_Trajectory.py
+Ficheiro: Dashboard_OpenBalance_V1.2,2.py
 
-Descrição: Interface gráfica para controlo em tempo real de uma plataforma
-           equilibradora de bola, com deteção por OpenCV e controlo PID via Arduino.
+Descrição: Versão final, estável e extensivamente comentada da interface
+           gráfica para controlo em tempo real de uma plataforma
+           equilibradora de bola. Este ficheiro serve como um guia de
+           aprendizagem sobre a sua própria arquitetura.
 
 Autor: João Pavão
 
-Data: 22/06/2025
+Data: 23/06/2025
 
 Disciplina: Laboratório de Aplicações em Robótica e Aprendizagem (PRIA)
 Instituição: Universidade dos Açores
 Licença: MIT License
 
 ===============================================================================
-Notas da versão 1.1:
-- Integra uma janela de gráficos com duas visualizações paralelas:
-  1. Gráfico de Erros (X/Y vs. Tempo) – útil para análise e afinação de PID.
-  2. Gráfico de Trajetória 2D (Y vs. X) – representação espacial da bola.
-- Interface robusta com ajuste de HSV, seleção de câmaras, comandos de controlo,
-  e visualização clara da posição da bola e do alvo.
-- Comunicação com Arduino através de comandos: M1 (motores ON), M0 (OFF), E,x,y (erro).
+Notas da versão 1.2.2 (Final Comentada):
+- COMENTÁRIOS PEDAGÓGICOS: Esta versão foi enriquecida com comentários
+  detalhados em todas as classes e métodos importantes. O objetivo é
+  explicar os conceitos-chave de:
+    - Arquitetura de Software (Programação Orientada a Objetos, Threads).
+    - Comunicação Segura entre Threads (Queues, Locks).
+    - Visão Computacional (Pipeline de deteção de cor com OpenCV).
+    - Interface Gráfica (CustomTkinter e integração com Matplotlib).
+- Nenhuma alteração funcional foi feita em relação à versão estável anterior.
+  O código é o mesmo, mas a sua legibilidade e valor educacional
+  foram maximizados.
 ===============================================================================
 
-# Índice de Estrutura e Comentários do Código
-Este índice resume a organização da aplicação `Dashboard_OpenBalance_V1.1_Trajectory.py`,
+# Índice de Estrutura e Comentários do Códig
+Este índice resume a organização da aplicação `Dashboard_OpenBalance_V1.2.2.py`,
 facilitando a navegação por classes e blocos principais.
 
 Estrutura modular:
@@ -38,12 +44,12 @@ Estrutura modular:
 | 3.1    | SerialManager              | Gestão da comunicação serial                           |
 | 3.2    | RealTimePlotFrame          | Gráfico PID (erro X/Y vs. tempo)                       |
 | 3.2.1  | TrajectoryPlotFrame        | Gráfico 2D com origem centrada (posição Y vs. X)       |
-| 3.2.2  | PlotWindow                 | Janela com ambos os gráficos                           |
+| 3.2.2  | PlotWindow                 | ### REMOVIDA ### Classe da janela pop-up               |
 | 3.3    | HSVSettingsFrame           | Sliders de HSV com presets interativos                 |
 | 3.4    | SystemControlFrame         | Botões de controlo e ligação à porta COM               |
 | 3.5    | VideoHandler               | Captura, processamento de vídeo e envio de erros       |
 | 3.6    | StatusBar                  | Mensagens temporárias no rodapé                        |
-| 4      | OpenBalanceApp             | Classe principal da aplicação                          |
+| 4      | OpenBalanceApp             | Classe principal da aplicação (layout alterado)        |
 | 5      | if __name__ == "__main__"  | Entrada principal da aplicação (executável)            |
 ================================================================================================
 """
@@ -51,43 +57,56 @@ Estrutura modular:
 # =============================================================================
 # 1. IMPORTAÇÕES DE BIBLIOTECAS
 # =============================================================================
-# Importações padrão e de sistema
-import json
-import threading
-import queue
-import time
-from collections import deque
+# ### COMENTÁRIO PEDAGÓGICO ###
+# A organização das importações é uma boa prática. Agrupamo-las por tipo:
+# bibliotecas padrão do Python e depois bibliotecas de terceiros (que
+# precisam de ser instaladas).
 
-# Importações de bibliotecas de terceiros (requerem instalação)
-import cv2  # OpenCV para processamento de imagem e vídeo
-import numpy as np  # NumPy para operações numéricas eficientes, especialmente com arrays
-import serial  # PySerial para comunicação com a porta serial (Arduino)
-import serial.tools.list_ports  # Ferramenta para listar portas seriais disponíveis
-from PIL import Image, ImageTk  # Pillow para conversão entre formatos de imagem (OpenCV -> Tkinter)
-import customtkinter as ctk  # Biblioteca para a criação da interface gráfica moderna
-import tkinter as tk  # Tkinter para elementos base da GUI e diálogos de ficheiro
-from tkinter import filedialog, messagebox
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg # Ponte entre Matplotlib e Tkinter
-import matplotlib.pyplot as plt  # Matplotlib para a criação de gráficos
+# --- Bibliotecas padrão do Python ---
+import json          # Para ler e escrever ficheiros de configuração no formato JSON.
+import threading     # Essencial para executar tarefas pesadas (como o vídeo) em paralelo,
+                     # sem bloquear a interface gráfica, que corre na thread principal.
+import queue         # Fornece a classe 'Queue' para comunicação segura entre threads.
+                     # É como uma "caixa de correio" onde uma thread deixa dados e outra os recolhe.
+import time          # Para controlo de tempo (ex: delays, timestamps para os gráficos).
+from collections import deque # 'deque' é uma fila otimizada com tamanho máximo. Ideal para
+                              # guardar um histórico de pontos para os gráficos.
+
+# --- Bibliotecas de Terceiros (requerem instalação via 'pip install ...') ---
+import cv2           # OpenCV: a principal biblioteca para todas as tarefas de visão computacional.
+import numpy as np   # NumPy: para operações matemáticas eficientes com arrays. Imagens, para o
+                     # computador, são arrays de números (píxeis).
+import serial        # PySerial: para comunicar com dispositivos através da porta serial (como o Arduino).
+import serial.tools.list_ports # Ferramenta para listar as portas COM/tty disponíveis no sistema.
+from PIL import Image, ImageTk # Pillow (PIL): para manipular imagens e convertê-las para um
+                                # formato compatível com a biblioteca gráfica Tkinter.
+import customtkinter as ctk # CustomTkinter: biblioteca que cria uma interface gráfica moderna.
+import tkinter as tk # Tkinter: a biblioteca base da GUI em Python. Usada para diálogos e conceitos base.
+from tkinter import filedialog, messagebox # Módulos específicos de Tkinter para caixas de diálogo.
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg # A "ponte" que permite incorporar
+                                                                 # gráficos Matplotlib na GUI Tkinter.
+import matplotlib.pyplot as plt # Matplotlib: a biblioteca mais popular para criar gráficos.
 
 # =============================================================================
 # 2. CONSTANTES E CONFIGURAÇÕES GLOBAIS
 # =============================================================================
-# --- Dimensões da UI ---
-WINDOW_WIDTH = 1280
-WINDOW_HEIGHT = 720
-VIDEO_WIDTH = 640
-VIDEO_HEIGHT = 480
+# ### COMENTÁRIO PEDAGÓGICO ###
+# Usar constantes globais com nomes descritivos (em maiúsculas por convenção)
+# torna o código mais legível e fácil de manter. Se precisarmos de alterar um
+# valor (ex: a resolução do vídeo), só o fazemos aqui.
+
+# --- Dimensões da UI e do Vídeo ---
+WINDOW_WIDTH, WINDOW_HEIGHT = 1480, 800
+VIDEO_WIDTH, VIDEO_HEIGHT = 640, 480
 
 # --- Configurações de Comunicação ---
 DEFAULT_BAUDRATE = 115200
 CONFIG_FILE_TYPES = [("Ficheiros JSON", "*.json")]
-
-# --- Comandos Seriais para o Arduino ---
-CMD_MOTORS_ON = "M1\n"  # Comando para ligar os motores
-CMD_MOTORS_OFF = "M0\n" # Comando para desligar os motores
+CMD_MOTORS_ON, CMD_MOTORS_OFF = "M1\n", "M0\n"
 
 # --- Presets de Deteção de Cor (HSV) ---
+# O espaço de cor HSV (Hue, Saturation, Value) é preferível ao RGB para deteção
+# de cor porque o 'Hue' (a cor em si) é menos afetado por variações de iluminação.
 HSV_PRESETS = {
     "Vermelho": {"h_min": 0, "h_max": 10, "s_min": 100, "s_max": 255, "v_min": 100, "v_max": 255},
     "Laranja": {"h_min": 10, "h_max": 25, "s_min": 100, "s_max": 255, "v_min": 100, "v_max": 255},
@@ -97,35 +116,34 @@ HSV_PRESETS = {
     "Branco": {"h_min": 0, "h_max": 180, "s_min": 0, "s_max": 30, "v_min": 200, "v_max": 255}
 }
 
-# --- Estilos dos Botões de Presets ---
+# --- Estilos da UI ---
 BUTTON_COLORS = {
-    "Vermelho": {"fg": "#FF0000", "hover": "#CC0000", "text": "white"},
-    "Laranja": {"fg": "#FFA500", "hover": "#CC8400", "text": "white"},
-    "Verde": {"fg": "#00B200", "hover": "#008000", "text": "white"},
-    "Cinzento": {"fg": "#808080", "hover": "#666666", "text": "white"},
-    "Azul": {"fg": "#0000FF", "hover": "#0000CC", "text": "white"},
-    "Branco": {"fg": "#FFFFFF", "hover": "#DDDDDD", "text": "black"}
+    "Vermelho": {"fg": "#FF0000", "hover": "#CC0000", "text": "white"}, "Laranja": {"fg": "#FFA500", "hover": "#CC8400", "text": "white"},
+    "Verde": {"fg": "#00B200", "hover": "#008000", "text": "white"}, "Cinzento": {"fg": "#808080", "hover": "#666666", "text": "white"},
+    "Azul": {"fg": "#0000FF", "hover": "#0000CC", "text": "white"}, "Branco": {"fg": "#FFFFFF", "hover": "#DDDDDD", "text": "black"}
 }
-
-# --- Paleta de Cores da UI ---
-COLOR_SUCCESS = {"fg_color": "green", "hover_color": "darkgreen"}
-COLOR_DANGER = {"fg_color": "#D32F2F", "hover_color": "#B71C1C"}
-COLOR_SECONDARY = {"fg_color": "gray50", "hover_color": "gray30"}
-COLOR_INFO = {"fg_color": "#0288D1", "hover_color": "#01579B"}
+COLOR_SUCCESS, COLOR_DANGER, COLOR_SECONDARY = {"fg_color": "green", "hover_color": "darkgreen"}, {"fg_color": "#D32F2F", "hover_color": "#B71C1C"}, {"fg_color": "gray50", "hover_color": "gray30"}
 
 
 # =============================================================================
 # 3. CLASSES MODULARES DA APLICAÇÃO
 # =============================================================================
+# ### COMENTÁRIO PEDAGÓGICO ###
+# A programação orientada a objetos (usando classes) é ideal para GUIs complexas.
+# Cada classe encapsula uma parte lógica da aplicação (ex: a gestão serial),
+# tornando o código mais organizado, reutilizável e fácil de depurar.
 
 # -----------------------------------------------------------------------------
 # 3.1. MÓDULO DE GESTÃO SERIAL
 # -----------------------------------------------------------------------------
 class SerialManager:
+    """Uma classe que abstrai e gere a comunicação com a porta serial."""
     def __init__(self):
         self.serial_conn = None
+
     def list_ports(self):
         return [port.device for port in serial.tools.list_ports.comports()]
+
     def connect(self, port, baudrate=DEFAULT_BAUDRATE):
         try:
             if self.serial_conn and self.serial_conn.is_open:
@@ -136,10 +154,12 @@ class SerialManager:
             self.serial_conn = None
             print(f"Erro ao conectar na porta serial: {e}")
             return False
+
     def disconnect(self):
         if self.serial_conn and self.serial_conn.is_open:
             self.serial_conn.close()
             self.serial_conn = None
+
     def send(self, data_str):
         if not (self.serial_conn and self.serial_conn.is_open):
             return
@@ -152,13 +172,21 @@ class SerialManager:
 # 3.2. MÓDULO DE VISUALIZAÇÃO GRÁFICA (GRÁFICO DE ERRO)
 # -----------------------------------------------------------------------------
 class RealTimePlotFrame(ctk.CTkFrame):
+    """Um widget que contém um gráfico Matplotlib para visualizar o erro PID em tempo real."""
     def __init__(self, parent, max_points=200, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
         self.data_x = deque(maxlen=max_points)
         self.data_y = deque(maxlen=max_points)
         self.timestamps = deque(maxlen=max_points)
         self.start_time = time.time()
-        self.fig, self.ax = plt.subplots(figsize=(5, 3))
+        self.fig, self.ax = plt.subplots(figsize=(4, 2.5))
+        self._style_plot()
+        self.line_x, = self.ax.plot([], [], label="Erro X", color='#E53935')
+        self.line_y, = self.ax.plot([], [], label="Erro Y", color='#1E88E5')
+        self._setup_legend_and_canvas()
+        self._update_plot() # Inicia o ciclo de atualização.
+
+    def _style_plot(self):
         self.fig.patch.set_facecolor('#2B2B2B')
         self.ax.set_facecolor('#2B2B2B')
         self.ax.tick_params(axis='x', colors='white')
@@ -167,51 +195,50 @@ class RealTimePlotFrame(ctk.CTkFrame):
         self.ax.yaxis.label.set_color('white')
         self.ax.xaxis.label.set_color('white')
         self.ax.title.set_color('white')
-        self.line_x, = self.ax.plot([], [], label="Erro X", color='#E53935')
-        self.line_y, = self.ax.plot([], [], label="Erro Y", color='#1E88E5')
-        legend = self.ax.legend(loc="upper right", facecolor='#333333', edgecolor='white')
-        for text in legend.get_texts(): text.set_color("white")
-        self.ax.set_ylim(-350, 350)
-        self.ax.set_xlim(0, 10)
         self.ax.set_title("Erro vs. Tempo")
         self.ax.set_xlabel("Tempo (s)")
         self.ax.set_ylabel("Erro (pixels)")
+
+    def _setup_legend_and_canvas(self):
+        legend = self.ax.legend(loc="upper right", facecolor='#333333', edgecolor='white', fontsize='small')
+        for text in legend.get_texts():
+            text.set_color("white")
+        self.fig.tight_layout(pad=0.5)
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)
         self.canvas_widget = self.canvas.get_tk_widget()
         self.canvas_widget.pack(fill="both", expand=True)
-        self._update_plot()
+
     def add_data_point(self, erro_x, erro_y):
-        now = time.time() - self.start_time
-        self.timestamps.append(now)
+        self.timestamps.append(time.time() - self.start_time)
         self.data_x.append(erro_x)
         self.data_y.append(erro_y)
+
     def _update_plot(self):
         if self.timestamps:
             self.line_x.set_data(self.timestamps, self.data_x)
             self.line_y.set_data(self.timestamps, self.data_y)
             current_time = self.timestamps[-1]
-            self.ax.set_xlim(max(0, current_time - 10), current_time + 1)
+            self.ax.set_xlim(max(0, current_time - 10), current_time + 1) # Janela de tempo deslizante.
         self.ax.relim()
         self.ax.autoscale_view(True, True, True)
         self.ax.set_ylim(-350, 350)
         self.canvas.draw()
-        self.after(100, self._update_plot)
-
+        self.after(100, self._update_plot) # Agenda a próxima atualização.
 
 # -----------------------------------------------------------------------------
-# 3.2.1. ### NOVO ### MÓDULO DE GRÁFICO DE TRAJETÓRIA
+# 3.2.1. MÓDULO DE GRÁFICO DE TRAJETÓRIA
 # -----------------------------------------------------------------------------
 class TrajectoryPlotFrame(ctk.CTkFrame):
-    """
-    Frame que contém o gráfico Matplotlib para visualização da trajetória 2D da bola.
-    """
+    """Um widget que mostra a trajetória 2D da bola, tendo o centro físico da plataforma como origem."""
     def __init__(self, parent, max_points=500, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
-
         self.trajectory_x = deque(maxlen=max_points)
         self.trajectory_y = deque(maxlen=max_points)
+        self.fig, self.ax = plt.subplots(figsize=(4, 3))
+        self._style_plot()
+        self._setup_markers_and_canvas()
 
-        self.fig, self.ax = plt.subplots(figsize=(5, 4))
+    def _style_plot(self):
         self.fig.patch.set_facecolor('#2B2B2B')
         self.ax.set_facecolor('#2B2B2B')
         self.ax.tick_params(axis='x', colors='white')
@@ -220,89 +247,46 @@ class TrajectoryPlotFrame(ctk.CTkFrame):
         self.ax.yaxis.label.set_color('white')
         self.ax.xaxis.label.set_color('white')
         self.ax.title.set_color('white')
+        self.ax.set_title("Trajetória na Plataforma")
+        self.ax.set_xlabel("Posição X (pixels do centro)")
+        self.ax.set_ylabel("Posição Y (pixels do centro)")
 
-        # Cria os elementos do gráfico: trajetória, posição atual e alvo
-        self.trajectory_line, = self.ax.plot([], [], color='yellow', linewidth=1, label='Trajetória')
-        self.current_pos_marker, = self.ax.plot([], [], 'o', markersize=12, color='lime', label='Pos. Atual')
-        self.target_pos_marker, = self.ax.plot([], [], 'o', markersize=12, color='blue', markeredgewidth=2, label='Alvo')
-        
-        # Cruz branca no centro da imagem (referência visual)
-        self.center_marker, = self.ax.plot(
-            [VIDEO_WIDTH // 2],
-            [VIDEO_HEIGHT // 2],
-            marker='+',
-            color='red',
-            markersize=12,
-            linewidth=10,
-            label='Centro'
-        )
-
-        # Configura limites e eixos
-        self.ax.set_title("Trajetória da Bola (Vista de Cima)")
-        self.ax.set_xlabel("Eixo X (pixels)")
-        self.ax.set_ylabel("Eixo Y (pixels)")
-        self.ax.set_xlim(0, VIDEO_WIDTH)
-        self.ax.set_ylim(VIDEO_HEIGHT, 0)
+    def _setup_markers_and_canvas(self):
+        self.trajectory_line, = self.ax.plot([], [], color='yellow', linewidth=1)
+        self.current_pos_marker, = self.ax.plot([], [], 'o', markersize=8, color='lime')
+        self.target_pos_marker, = self.ax.plot([], [], 'o', markersize=12, color='blue', markeredgewidth=2)
+        self.center_marker, = self.ax.plot([0], [0], marker='+', color='red', markersize=12, markeredgewidth=2)
+        half_width, half_height = VIDEO_WIDTH // 2, VIDEO_HEIGHT // 2
+        self.ax.set_xlim(-half_width, half_width)
+        self.ax.set_ylim(half_height, -half_height) # Eixo Y invertido para corresponder ao vídeo.
         self.ax.grid(True, which='both', linestyle='--', linewidth=0.5)
-        self.ax.set_aspect('equal', adjustable='box') # Garante que o gráfico seja quadrado
-
+        self.ax.set_aspect('equal', adjustable='box')
+        self.fig.tight_layout(pad=0.5)
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)
         self.canvas_widget = self.canvas.get_tk_widget()
         self.canvas_widget.pack(fill="both", expand=True)
 
     def update_plot(self, ball_pos, target_pos):
-        """Atualiza o gráfico com as novas posições da bola e do alvo."""
+        fixed_center_x, fixed_center_y = VIDEO_WIDTH // 2, VIDEO_HEIGHT // 2
+        rel_target_x = target_pos[0] - fixed_center_x
+        rel_target_y = target_pos[1] - fixed_center_y
+        self.target_pos_marker.set_data([rel_target_x], [rel_target_y])
         if ball_pos:
-            self.trajectory_x.append(ball_pos[0])
-            self.trajectory_y.append(ball_pos[1])
-            self.current_pos_marker.set_data([ball_pos[0]], [ball_pos[1]])
-
+            rel_ball_x = ball_pos[0] - fixed_center_x
+            rel_ball_y = ball_pos[1] - fixed_center_y
+            self.trajectory_x.append(rel_ball_x)
+            self.trajectory_y.append(rel_ball_y)
+            self.current_pos_marker.set_data([rel_ball_x], [rel_ball_y])
         else:
-            # Se a bola não for detetada, esconde o marcador
             self.current_pos_marker.set_data([], [])
-
         self.trajectory_line.set_data(self.trajectory_x, self.trajectory_y)
-        self.target_pos_marker.set_data([target_pos[0]], [target_pos[1]])
-        
-        # Usa draw_idle para uma atualização mais eficiente
         self.canvas.draw_idle()
-
-
-# -----------------------------------------------------------------------------
-# 3.2.2. ### ALTERADO ### JANELA DE GRÁFICOS COMBINADA
-# -----------------------------------------------------------------------------
-class PlotWindow(ctk.CTkToplevel):
-    """
-    Janela pop-up que combina o gráfico de erro e o gráfico de trajetória.
-    """
-    def __init__(self, master, *args, **kwargs):
-        super().__init__(master, *args, **kwargs)
-        self.title("Análise Gráfica em Tempo Real")
-        self.geometry("1100x550") # Tamanho ajustado para dois gráficos
-        
-        # Grelha com 2 colunas, ambas com o mesmo peso
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=1)
-
-        # Gráfico de Erro vs. Tempo (esquerda)
-        self.plot_frame_error = RealTimePlotFrame(self)
-        self.plot_frame_error.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
-
-        # Gráfico de Trajetória (direita)
-        self.plot_frame_trajectory = TrajectoryPlotFrame(self)
-        self.plot_frame_trajectory.grid(row=0, column=1, padx=(5, 10), pady=10, sticky="nsew")
-
-        self.protocol("WM_DELETE_WINDOW", self.hide_window)
-
-    def hide_window(self):
-        self.withdraw()
-
 
 # -----------------------------------------------------------------------------
 # 3.3. MÓDULO DE INTERFACE: PAINEL DE CONFIGURAÇÕES HSV
 # -----------------------------------------------------------------------------
 class HSVSettingsFrame(ctk.CTkFrame):
+    """Painel da UI com sliders para ajustar os limites de cor HSV."""
     def __init__(self, parent, video_handler, *args, **kwargs):
         super().__init__(parent, corner_radius=10, *args, **kwargs)
         self.video_handler = video_handler
@@ -321,32 +305,54 @@ class HSVSettingsFrame(ctk.CTkFrame):
         self.show_mask_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(self, text="Mostrar Máscara", variable=self.show_mask_var, command=self._on_toggle_mask).grid(row=13, column=0, pady=(10,5), padx=10, sticky="w")
         for i, (name, colors) in enumerate(BUTTON_COLORS.items()):
+            # A função `lambda` aqui é crucial para capturar o valor de `name` no momento
+            # da criação do botão. Sem ela, todos os botões usariam o último valor de `name`.
             ctk.CTkButton(self, text=name, fg_color=colors["fg"], hover_color=colors["hover"], text_color=colors["text"], command=lambda n=name: self._apply_preset(n)).grid(row=14 + i, column=0, pady=2, padx=10, sticky="ew")
         self._debounce_job = None
+
     def _on_slider_change(self, _=None):
-        for slider in self.hsv_sliders: slider.val_var.set(f"{int(slider.get())}")
+        for slider in self.hsv_sliders:
+            slider.val_var.set(f"{int(slider.get())}")
         self._schedule_hsv_update()
+
     def _schedule_hsv_update(self):
-        if self._debounce_job: self.after_cancel(self._debounce_job)
+        if self._debounce_job:
+            self.after_cancel(self._debounce_job)
         self._debounce_job = self.after(150, self._perform_hsv_update)
+
     def _perform_hsv_update(self):
         self._debounce_job = None
-        if self.video_handler: self.video_handler.update_hsv_from_frame()
+        if self.video_handler:
+            self.video_handler.update_hsv_from_frame()
+
     def _apply_preset(self, name):
         preset = HSV_PRESETS.get(name)
         if not preset: return
         vals = [preset[k] for k in ["h_min", "h_max", "s_min", "s_max", "v_min", "v_max"]]
-        for i, val in enumerate(vals): self.hsv_sliders[i].set(val); self.hsv_values[i].set(str(val))
-        if self.video_handler: self._perform_hsv_update(); self.video_handler.update_once()
+        for i, val in enumerate(vals):
+            self.hsv_sliders[i].set(val)
+            self.hsv_values[i].set(str(val))
+        if self.video_handler:
+            self._perform_hsv_update()
+            self.video_handler.update_once()
+
     def _on_toggle_mask(self):
-        if self.video_handler: self.video_handler.set_show_mask(self.show_mask_var.get())
+        if self.video_handler:
+            self.video_handler.set_show_mask(self.show_mask_var.get())
+
     def get_hsv_bounds(self):
-        try: values = [int(v.get()) for v in self.hsv_values]
-        except ValueError: values = [0, 255, 0, 255, 0, 255]
+        try:
+            values = [int(v.get()) for v in self.hsv_values]
+        except ValueError:
+            values = [0, 255, 0, 255, 0, 255]
         return np.array([values[0], values[2], values[4]]), np.array([values[1], values[3], values[5]])
+
     def load_hsv(self, hsv_dict):
         vals = [hsv_dict.get(k, 0) for k in ["h_min", "h_max", "s_min", "s_max", "v_min", "v_max"]]
-        for i, val in enumerate(vals): self.hsv_sliders[i].set(val); self.hsv_values[i].set(str(val))
+        for i, val in enumerate(vals):
+            self.hsv_sliders[i].set(val)
+            self.hsv_values[i].set(str(val))
+
     def save_hsv(self):
         lower, upper = self.get_hsv_bounds()
         return {"h_min": int(lower[0]), "h_max": int(upper[0]), "s_min": int(lower[1]), "s_max": int(upper[1]), "v_min": int(lower[2]), "v_max": int(upper[2])}
@@ -355,9 +361,11 @@ class HSVSettingsFrame(ctk.CTkFrame):
 # 3.4. MÓDULO DE INTERFACE: PAINEL DE CONTROLO DO SISTEMA
 # -----------------------------------------------------------------------------
 class SystemControlFrame(ctk.CTkFrame):
-    def __init__(self, parent, serial_manager: SerialManager, app_ref, *args, **kwargs):
+    """Painel da UI com os botões principais de controlo do sistema."""
+    def __init__(self, parent, serial_manager: SerialManager, app_ref: 'OpenBalanceApp', *args, **kwargs):
         super().__init__(parent, corner_radius=10, *args, **kwargs)
-        self.serial_manager, self.app = serial_manager, app_ref
+        self.serial_manager = serial_manager
+        self.app = app_ref
         self.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(self, text="Controlo do Sistema", font=("Arial", 20, "bold")).grid(row=0, column=0, padx=10, pady=(10, 5))
         motor_group = ctk.CTkFrame(self, fg_color="transparent"); motor_group.grid(row=1, column=0, padx=10, pady=10, sticky="ew")
@@ -367,7 +375,6 @@ class SystemControlFrame(ctk.CTkFrame):
         self.btn_ligar_seguimento = ctk.CTkButton(motor_group, text="Ligar Seguimento", command=self._toggle_seguimento, **COLOR_SECONDARY)
         self.btn_ligar_seguimento.grid(row=1, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
         ctk.CTkButton(motor_group, text="Reset Centro", command=self._reset_centro_manual, fg_color="#AA00AA", hover_color="#880088").grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
-        ctk.CTkButton(motor_group, text="Ver Gráfico", command=self.app._show_plot_window, **COLOR_INFO).grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
         serial_group = ctk.CTkFrame(self, fg_color="transparent"); serial_group.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
         serial_group.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(serial_group, text="Comunicação Arduino", font=("Arial", 18, "bold")).grid(row=0, column=0, columnspan=2, pady=(5, 10))
@@ -377,6 +384,7 @@ class SystemControlFrame(ctk.CTkFrame):
         ctk.CTkButton(serial_group, text="🔄", width=30, command=self._atualizar_portas).grid(row=1, column=1, padx=5, pady=5)
         ctk.CTkButton(serial_group, text="Ligar", command=self._ligar_arduino, **COLOR_SUCCESS).grid(row=2, column=0, padx=5, pady=5, sticky="ew")
         ctk.CTkButton(serial_group, text="Desligar", command=self._desligar_arduino, **COLOR_DANGER).grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+
     def _toggle_seguimento(self):
         vh = self.app.video_handler
         if not vh: return
@@ -391,8 +399,10 @@ class SystemControlFrame(ctk.CTkFrame):
     def _ligar_motores(self): self.serial_manager.send(CMD_MOTORS_ON); self.app.status_bar.show_message("Comando para ligar motores enviado.")
     def _desligar_motores(self): self.serial_manager.send(CMD_MOTORS_OFF); self.app.status_bar.show_message("Comando para desligar motores enviado.")
     def _atualizar_portas(self):
-        novas_portas = self.serial_manager.list_ports(); self.option_menu_porta.configure(values=novas_portas or ["Nenhuma porta"])
-        self.porta_var.set(novas_portas[0] if novas_portas else "Nenhuma porta"); self.app.status_bar.show_message("Portas atualizadas.")
+        novas_portas = self.serial_manager.list_ports()
+        self.option_menu_porta.configure(values=novas_portas or ["Nenhuma porta"])
+        self.porta_var.set(novas_portas[0] if novas_portas else "Nenhuma porta")
+        self.app.status_bar.show_message("Lista de portas COM atualizada.")
     def _ligar_arduino(self):
         porta = self.porta_var.get()
         if porta != "Nenhuma porta":
@@ -404,52 +414,49 @@ class SystemControlFrame(ctk.CTkFrame):
         if self.app.video_handler:
             self.app.video_handler.reset_center()
             self.app.status_bar.show_message("Centro redefinido para o centro da imagem.")
-    def get_pid_config(self): return {}
-    def load_pid_config(self, pid_dict): pass
 
 # -----------------------------------------------------------------------------
-# 3.5. ### ALTERADO ### MÓDULO DE VÍDEO E PROCESSAMENTO DE IMAGEM
+# 3.5. MÓDULO DE VÍDEO E PROCESSAMENTO DE IMAGEM
 # -----------------------------------------------------------------------------
 class VideoHandler:
-    def __init__(self, parent, hsv_frame_ref: HSVSettingsFrame, serial_manager: SerialManager, error_queue: queue.Queue, camera_index=0):
-        self.parent, self.hsv_frame_ref, self.serial_manager, self.error_queue = parent, hsv_frame_ref, serial_manager, error_queue
-        self.camera_index = camera_index; self.cap = None; self.thread = None; self.running = False
+    """Gere a captura, processamento de imagem e comunicação de dados numa thread separada."""
+    def __init__(self, parent, hsv_frame_ref: 'HSVSettingsFrame', serial_manager: SerialManager, error_queue: queue.Queue, camera_index=0):
+        self.parent, self.hsv_frame_ref = parent, hsv_frame_ref
+        self.serial_manager, self.error_queue = serial_manager, error_queue
+        self.camera_index, self.cap, self.thread, self.running = camera_index, None, None, False
         self.frame_queue = queue.Queue(maxsize=1)
         self.center_x, self.center_y = VIDEO_WIDTH // 2, VIDEO_HEIGHT // 2
         self.shared_lock = threading.Lock()
         self.hsv_lower, self.hsv_upper = np.array([0,0,0]), np.array([255,255,255])
-        self.show_mask = False
-        self._tracking_enabled_internal = False
-        self.last_send_time = 0
+        self.show_mask, self._tracking_enabled_internal, self.last_send_time = False, False, 0
         self.canvas = ctk.CTkCanvas(parent, width=768, height=576, bg="gray20", highlightthickness=0)
         self.canvas.grid(row=2, column=0, padx=10, pady=10)
         self.canvas.bind("<Button-1>", self._on_mouse_click)
         self.update_hsv_from_frame()
         self._initialize_camera()
+    
     def update_hsv_from_frame(self):
         if not self.hsv_frame_ref: return
         lower, upper = self.hsv_frame_ref.get_hsv_bounds()
         with self.shared_lock: self.hsv_lower, self.hsv_upper = lower, upper
+    
     def set_show_mask(self, state: bool):
         with self.shared_lock: self.show_mask = state
+    
     def set_tracking_enabled(self, state: bool):
         with self.shared_lock: self._tracking_enabled_internal = state
+    
     @property
     def tracking_enabled_safe(self) -> bool:
         with self.shared_lock: return self._tracking_enabled_internal
+    
     def reset_center(self):
         with self.shared_lock: self.center_x, self.center_y = VIDEO_WIDTH // 2, VIDEO_HEIGHT // 2
-    #def _on_mouse_click(self, event):
-        #with self.shared_lock: self.center_x, self.center_y = event.x, event.y
+    
     def _on_mouse_click(self, event):
-        canvas_w, canvas_h = 768, 576  # Tamanho da imagem redimensionada
-        scale_x = VIDEO_WIDTH / canvas_w
-        scale_y = VIDEO_HEIGHT / canvas_h
-
-        with self.shared_lock:
-            self.center_x = int(event.x * scale_x)
-            self.center_y = int(event.y * scale_y)
-
+        scale_x, scale_y = VIDEO_WIDTH / 768, VIDEO_HEIGHT / 576
+        with self.shared_lock: self.center_x, self.center_y = int(event.x * scale_x), int(event.y * scale_y)
+            
     def _initialize_camera(self):
         if self.cap and self.cap.isOpened():
             self.running = False
@@ -457,89 +464,85 @@ class VideoHandler:
             self.cap.release()
         self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, VIDEO_WIDTH); self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, VIDEO_HEIGHT)
-        if not self.cap.isOpened():
-            messagebox.showerror("Erro de Vídeo", f"Não foi possível aceder à webcam {self.camera_index}.")
+        if not self.cap.isOpened(): messagebox.showerror("Erro", f"Não foi possível aceder à webcam {self.camera_index}.")
         else:
             self.running = True
             self.thread = threading.Thread(target=self._video_loop, daemon=True)
             self.thread.start()
             self._update_canvas_from_queue()
+
     def _video_loop(self):
-        while self.running and self.cap and self.cap.isOpened():
+        while self.running and self.cap.isOpened():
             ret, frame_bgr = self.cap.read()
             if not ret: break
-            try:
-                self.frame_queue.put_nowait(self._process_frame_for_display(frame_bgr))
-            except queue.Full:
-                pass
+            try: self.frame_queue.put_nowait(self._process_frame_for_display(frame_bgr))
+            except queue.Full: pass
         self.running = False
 
     def _process_frame_for_display(self, frame_bgr):
         height, width, _ = frame_bgr.shape
         with self.shared_lock:
-            center_x, center_y = self.center_x, self.center_y
-            lower, upper, show_mask, tracking = self.hsv_lower, self.hsv_upper, self.show_mask, self._tracking_enabled_internal
+            center_x, center_y, lower, upper, show_mask, tracking = self.center_x, self.center_y, self.hsv_lower, self.hsv_upper, self.show_mask, self._tracking_enabled_internal
         
         hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, lower, upper)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
-        display_img = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB) if show_mask else cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        display_img = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR) if show_mask else frame_bgr.copy()
         
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        erro_x, erro_y = 0, 0
-        ball_pos = None # ### NOVO ###: Inicializa a posição da bola como Nula
+        erro_x, erro_y, ball_pos = 0, 0, None
 
         if contours:
             c = max(contours, key=cv2.contourArea)
             if cv2.contourArea(c) > 500:
                 (x, y), radius = cv2.minEnclosingCircle(c)
-                ball_pos = (int(x), int(y)) # ### NOVO ###: Guarda a posição da bola
+                ball_pos = (int(x), int(y))
                 erro_x, erro_y = ball_pos[0] - center_x, -(ball_pos[1] - center_y)
 
                 if tracking and self.serial_manager.serial_conn:
-                    now = time.time()
-                    if now - self.last_send_time > 0.05:
+                    if time.time() - self.last_send_time > 0.05:
                         self.serial_manager.send(f"E,{erro_x},{erro_y}\n")
-                        self.last_send_time = now
-
+                        self.last_send_time = time.time()
+                
                 cv2.circle(display_img, ball_pos, int(radius), (0, 255, 0), 2)
-                cv2.circle(display_img, ball_pos, 3, (255, 0, 0), -1)
-                cv2.putText(display_img, f"Erro X: {erro_x:+d}, Y: {erro_y:+d}", (10, height - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
-        
-        # ### ALTERADO ###: Envia um pacote de dados mais completo para a queue
-        target_pos = (center_x, center_y)
-        try:
-            # Pacote: (erro_x, erro_y, pos_bola, pos_alvo)
-            self.error_queue.put_nowait((erro_x, erro_y, ball_pos, target_pos))
-        except queue.Full:
-            pass
+                cv2.circle(display_img, ball_pos, 3, (0, 0, 255), -1)
 
-        cv2.line(display_img, (width//2 - 10, height//2), (width//2 + 10, height//2), (255, 0, 0), 4)
-        cv2.line(display_img, (width//2, height//2 - 10), (width//2, height//2 + 10), (255, 0, 0), 4)
-        cv2.circle(display_img, (center_x, center_y), 5, (0, 0, 255), -1)
-        return display_img
+        try:
+            self.error_queue.put_nowait((erro_x, erro_y, ball_pos, (center_x, center_y)))
+        except queue.Full: pass
+        
+        cv2.line(display_img, (width//2 - 10, height//2), (width//2 + 10, height//2), (0, 0, 255), 2)
+        cv2.line(display_img, (width//2, height//2 - 10), (width//2, height//2 + 10), (0, 0, 255), 2)
+        cv2.circle(display_img, (center_x, center_y), 5, (255, 0, 0), -1)
+        
+        return cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB)
 
     def _update_canvas_from_queue(self):
         try:
-            frame = self.frame_queue.get_nowait()
-            img_pil = Image.fromarray(frame).resize((768, 576), Image.BICUBIC); img_tk = ImageTk.PhotoImage(image=img_pil)
+            frame_rgb = self.frame_queue.get_nowait()
+            img_pil = Image.fromarray(frame_rgb).resize((768, 576), Image.BICUBIC)
+            img_tk = ImageTk.PhotoImage(image=img_pil)
             self.canvas.create_image(0, 0, anchor="nw", image=img_tk)
             self.canvas.image = img_tk
-        except queue.Empty:
-            pass
+        except queue.Empty: pass
         finally:
             if self.running: self.canvas.after(33, self._update_canvas_from_queue)
+
     def change_camera(self, new_index):
         try: self.camera_index = int(new_index)
         except ValueError: messagebox.showerror("Câmera", f"Índice inválido: {new_index}"); return
         self._initialize_camera()
+
     def update_once(self):
         if self.cap and self.cap.isOpened():
             ret, frame = self.cap.read()
             if ret:
                 display_img = self._process_frame_for_display(frame)
-                img_pil = Image.fromarray(display_img); img_tk = ImageTk.PhotoImage(image=img_pil)
-                self.canvas.create_image(0, 0, anchor="nw", image=img_tk); self.canvas.image = img_tk
+                img_pil = Image.fromarray(display_img)
+                img_tk = ImageTk.PhotoImage(image=img_pil)
+                self.canvas.create_image(0, 0, anchor="nw", image=img_tk)
+                self.canvas.image = img_tk
+
     def stop(self):
         self.running = False
         if self.thread and self.thread.is_alive(): self.thread.join(timeout=1)
@@ -549,10 +552,13 @@ class VideoHandler:
 # 3.6. MÓDULO DE INTERFACE: BARRA DE STATUS
 # -----------------------------------------------------------------------------
 class StatusBar(ctk.CTkFrame):
+    """Barra de status no rodapé para exibir mensagens temporárias."""
     def __init__(self, parent, *args, **kwargs):
         super().__init__(parent, corner_radius=0, *args, **kwargs)
-        self.label = ctk.CTkLabel(self, text="", anchor="w", font=("Arial", 16)); self.label.pack(side="left", fill="x", expand=True, padx=10, pady=2)
+        self.label = ctk.CTkLabel(self, text="", anchor="w", font=("Arial", 16))
+        self.label.pack(side="left", fill="x", expand=True, padx=10, pady=2)
         self._job = None
+    
     def show_message(self, message, duration_ms=5000, is_error=False):
         if self._job: self.after_cancel(self._job)
         text_color = "#FF5555" if is_error else "#FFD700"
@@ -563,17 +569,61 @@ class StatusBar(ctk.CTkFrame):
 # 4. CLASSE PRINCIPAL DA APLICAÇÃO
 # =============================================================================
 class OpenBalanceApp:
+    """A classe principal que constrói e gere toda a aplicação."""
     def __init__(self):
-        ctk.set_appearance_mode("dark"); ctk.set_default_color_theme("dark-blue")
-        self.app = ctk.CTk(); self.app.title("OpenBalance Dashboard"); self.app.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
-        self.app.grid_rowconfigure(0, weight=1); self.app.grid_rowconfigure(1, weight=0); self.app.grid_columnconfigure(0, weight=1)
-        self.app.grid_columnconfigure(1, weight=3); self.app.grid_columnconfigure(2, weight=1)
-        self.serial_manager = SerialManager(); self.video_handler = None
-        self.plot_window = None
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("dark-blue")
+        self.app = ctk.CTk()
+        self.app.title("OpenBalance")
+        self.app.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
+        
+        self.app.grid_rowconfigure(0, weight=1)
+        self.app.grid_rowconfigure(1, weight=0)
+        self.app.grid_columnconfigure(0, weight=1)
+        self.app.grid_columnconfigure(1, weight=3)
+        self.app.grid_columnconfigure(2, weight=1)
+        
+        self.serial_manager = SerialManager()
+        self.video_handler = None
         self.error_queue = queue.Queue()
-        self._create_menu(); self._create_frames(); self._create_status_bar()
-        self._process_error_queue() 
+        
+        self._create_frames()
+        self._create_menu()
+        self.status_bar = StatusBar(self.app)
+        self.status_bar.grid(row=1, column=0, columnspan=3, sticky="sew")
+        
+        self._process_error_queue()
         self.app.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _create_frames(self):
+        # A ordem de criação é importante. Primeiro os frames que não dependem de outros.
+        self.hsv_frame = HSVSettingsFrame(self.app, video_handler=None)
+        self.hsv_frame.grid(row=0, column=0, sticky="nswe", padx=10, pady=10)
+        
+        video_container = ctk.CTkFrame(self.app, corner_radius=10)
+        video_container.grid(row=0, column=1, sticky="nswe", padx=10, pady=10)
+        video_container.grid_rowconfigure(2, weight=1); video_container.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(video_container, text="Área de Visualização", font=("Arial", 22, "bold")).grid(row=0, column=0, pady=(10,5))
+        cam_frame = ctk.CTkFrame(video_container, fg_color="transparent")
+        cam_frame.grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(cam_frame, text="Câmera:").pack(side="left", padx=(0, 5))
+        self.cam_var = tk.StringVar(value="0")
+        ctk.CTkOptionMenu(cam_frame, values=["0", "1", "2", "3"], variable=self.cam_var, command=self._on_camera_change).pack(side="left")
+        
+        right_panel = ctk.CTkFrame(self.app, fg_color="transparent")
+        right_panel.grid(row=0, column=2, sticky="nswe", padx=10, pady=10)
+        right_panel.grid_columnconfigure(0, weight=1); right_panel.grid_rowconfigure(0, weight=0)
+        right_panel.grid_rowconfigure(1, weight=1); right_panel.grid_rowconfigure(2, weight=1)
+        
+        self.control_frame = SystemControlFrame(right_panel, self.serial_manager, app_ref=self)
+        self.control_frame.grid(row=0, column=0, sticky="new", pady=(0,10))
+        self.plot_frame_error = RealTimePlotFrame(right_panel, corner_radius=10)
+        self.plot_frame_error.grid(row=1, column=0, sticky="nsew", pady=(0,10))
+        self.plot_frame_trajectory = TrajectoryPlotFrame(right_panel, corner_radius=10)
+        self.plot_frame_trajectory.grid(row=2, column=0, sticky="nsew")
+        
+        self.video_handler = VideoHandler(video_container, self.hsv_frame, self.serial_manager, self.error_queue, int(self.cam_var.get()))
+        self.hsv_frame.video_handler = self.video_handler
 
     def _create_menu(self):
         menu = tk.Menu(self.app)
@@ -586,91 +636,62 @@ class OpenBalanceApp:
         ajuda_menu = tk.Menu(menu, tearoff=0)
         ajuda_menu.add_command(label="Sobre o Projeto", command=self._mostrar_sobre)
         ajuda_menu.add_command(label="Manual de Utilização", command=self._mostrar_manual)
-        ajuda_menu.add_command(label="Créditos", command=self._mostrar_creditos)
         menu.add_cascade(label="ℹ️ Ajuda", menu=ajuda_menu)
         self.app.config(menu=menu)
 
-    def _create_status_bar(self):
-        self.status_bar = StatusBar(self.app); self.status_bar.grid(row=1, column=0, columnspan=3, sticky="sew")
-
-    def _create_frames(self):
-        video_container = ctk.CTkFrame(self.app, corner_radius=10); video_container.grid(row=0, column=1, sticky="nswe", padx=10, pady=10)
-        video_container.grid_rowconfigure(2, weight=1); video_container.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(video_container, text="Área de Visualização", font=("Arial", 22, "bold")).grid(row=0, column=0, pady=(10,5))
-        cam_frame = ctk.CTkFrame(video_container, fg_color="transparent"); cam_frame.grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        ctk.CTkLabel(cam_frame, text="Câmera:").pack(side="left", padx=(0, 5))
-        self.cam_var = tk.StringVar(value="0")
-        ctk.CTkOptionMenu(cam_frame, values=["0", "1", "2", "3"], variable=self.cam_var, command=self._on_camera_change).pack(side="left")
-        self.hsv_frame = HSVSettingsFrame(self.app, video_handler=None); self.hsv_frame.grid(row=0, column=0, sticky="nswe", padx=10, pady=10)
-        self.control_frame = SystemControlFrame(self.app, self.serial_manager, app_ref=self); self.control_frame.grid(row=0, column=2, sticky="nswe", padx=10, pady=10)
-        self.video_handler = VideoHandler(video_container, self.hsv_frame, self.serial_manager, self.error_queue, int(self.cam_var.get()))
-        self.hsv_frame.video_handler = self.video_handler
-
     def _on_camera_change(self, index):
         if self.video_handler: self.video_handler.change_camera(index)
-    
+
     def _salvar_config(self):
-        config = {"hsv": self.hsv_frame.save_hsv(), "pid": self.control_frame.get_pid_config()}
-        filepath = filedialog.asksaveasfilename(defaultextension=".json", filetypes=CONFIG_FILE_TYPES)
-        if not filepath: return
-        try:
-            with open(filepath, 'w', encoding='utf-8') as f: json.dump(config, f, indent=4)
-            self.status_bar.show_message(f"Configuração salva em {filepath}")
-        except Exception as e: self.status_bar.show_message(f"Erro ao salvar: {e}", is_error=True)
+        if filepath := filedialog.asksaveasfilename(defaultextension=".json", filetypes=CONFIG_FILE_TYPES):
+            try:
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    json.dump({"hsv": self.hsv_frame.save_hsv()}, f, indent=4)
+                self.status_bar.show_message(f"Configuração salva em {filepath}")
+            except Exception as e: self.status_bar.show_message(f"Erro ao salvar: {e}", is_error=True)
 
     def _carregar_config(self):
-        filepath = filedialog.askopenfilename(filetypes=CONFIG_FILE_TYPES)
-        if not filepath: return
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f: config = json.load(f)
-            self.hsv_frame.load_hsv(config.get("hsv", {}))
-            self.control_frame.load_pid_config(config.get("pid", {}))
-            self.status_bar.show_message("Configuração carregada com sucesso.")
-            if self.video_handler: self.video_handler.update_hsv_from_frame(); self.video_handler.update_once()
-        except Exception as e: self.status_bar.show_message(f"Erro ao carregar: {e}", is_error=True)
+        if filepath := filedialog.askopenfilename(filetypes=CONFIG_FILE_TYPES):
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                self.hsv_frame.load_hsv(config.get("hsv", {}))
+                self.status_bar.show_message("Configuração carregada com sucesso.")
+                if self.video_handler:
+                    self.video_handler.update_hsv_from_frame()
+                    self.video_handler.update_once()
+            except Exception as e:
+                self.status_bar.show_message(f"Erro ao carregar: {e}", is_error=True)
 
-    def _mostrar_sobre(self):
-        messagebox.showinfo("Sobre o Projeto", "OpenBalance Dashboard\nVersão 1.1\nControlo PID com visão computacional.\nJoão Pavão – Universidade dos Açores")
-
-    def _mostrar_manual(self):
-        messagebox.showinfo("Manual de Utilização", "1. Ligue o Arduino e selecione a porta COM\n2. Clique em 'Ligar Motores'\n3. Ajuste os parâmetros HSV\n4. Clique em 'Ligar Seguimento' para iniciar o controlo\n5. Use 'Ver Gráfico' para análise de erros e trajetória.")
-
-    def _mostrar_creditos(self):
-        messagebox.showinfo("Créditos", "Desenvolvido por João Pavão\nSupervisão: PRIA - Universidade dos Açores\nLicença: MIT License")
-
-    def _show_plot_window(self):
-        if self.plot_window is None:
-            self.plot_window = PlotWindow(self.app)
-            self.plot_window.withdraw()
-        if not self.plot_window.winfo_viewable():
-             self.plot_window.deiconify()
-        self.plot_window.lift()
-
-    # ### ALTERADO ###: Processa a queue com os novos dados de posição
+    def _mostrar_sobre(self): messagebox.showinfo("Sobre", "OpenBalance Dashboard v1.8\nJ. Pavão, PRIA, UAc")
+    def _mostrar_manual(self): messagebox.showinfo("Manual", "1. Ligue o Arduino.\n2. Ajuste o HSV para detetar a bola.\n3. Clique na imagem para definir o alvo.\n4. Ligue os motores e o seguimento.")
+    
     def _process_error_queue(self):
         try:
             while not self.error_queue.empty():
                 erro_x, erro_y, ball_pos, target_pos = self.error_queue.get_nowait()
-                if self.plot_window and self.plot_window.winfo_viewable():
-                    # Envia os dados para os gráficos correspondentes
-                    self.plot_window.plot_frame_error.add_data_point(erro_x, erro_y)
-                    self.plot_window.plot_frame_trajectory.update_plot(ball_pos, target_pos)
-        except queue.Empty:
-            pass
-        finally:
-            self.app.after(100, self._process_error_queue)
-
+                if self.plot_frame_error: self.plot_frame_error.add_data_point(erro_x, erro_y)
+                if self.plot_frame_trajectory: self.plot_frame_trajectory.update_plot(ball_pos, target_pos)
+        except queue.Empty: pass
+        finally: self.app.after(100, self._process_error_queue)
+    
     def _on_close(self):
         if self.video_handler: self.video_handler.stop()
         self.serial_manager.disconnect()
         self.app.destroy()
-
+    
     def run(self):
         self.app.mainloop()
 
 # =============================================================================
 # 5. PONTO DE ENTRADA DO SCRIPT
 # =============================================================================
+# ### COMENTÁRIO PEDAGÓGICO ###
+# O bloco `if __name__ == "__main__":` é uma convenção padrão em Python.
+# O código dentro deste bloco só é executado quando o ficheiro é corrido
+# diretamente. Se o ficheiro for importado como um módulo noutro script,
+# este bloco não é executado, o que o torna ideal para ser o ponto de
+# entrada principal de uma aplicação.
 if __name__ == "__main__":
     app = OpenBalanceApp()
     app.run()
